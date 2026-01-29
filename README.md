@@ -34,10 +34,22 @@ dbutils.notebook.run(
 
 ## Dashboard
 
-Create visualizations in Databricks SQL Workspace using the queries in the notebook:
-- Governance score by category (bar chart)
-- Overall governance score (counter)
-- Failed checks (table)
+The notebook automatically deploys a Lakeview Dashboard to `/Shared/Governance/` with:
+
+- **Total Checks Counter**: Number of governance checks performed
+- **Total Score Counter**: Aggregated governance score
+- **Pass Rate Counter**: Percentage of checks that passed
+- **Average Score by Category**: Bar chart showing performance across categories
+- **Status Distribution**: Pie chart showing pass/fail distribution
+- **Detailed Results Table**: Full governance check results
+
+### Manual Import
+
+If automatic dashboard creation fails, you can manually import:
+
+1. Go to SQL Workspace → Dashboards → Import Dashboard
+2. Upload `dashboard_template.lvdash.json`
+3. Update the dataset query to your table: `{catalog}.{schema}.governance_results`
 
 ## Categories
 
@@ -48,3 +60,10 @@ Create visualizations in Databricks SQL Workspace using the queries in the noteb
 - Migration Completeness (3 checks)
 - Audit & Lineage Coverage (3 checks)
 - Privileges (3 checks)
+
+## Files
+
+- `governance_analyzer.py`: Core governance check functions and dashboard deployment
+- `governance_analysis.ipynb`: Main notebook to run checks and deploy dashboard
+- `dashboard_template.lvdash.json`: Lakeview dashboard definition
+- `README.md`: This documentation
