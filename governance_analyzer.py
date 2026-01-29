@@ -43,24 +43,46 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
         "Content-Type": "application/json"
     }
     
-    # Create the dashboard
+    # Ensure folder exists
+    if folder_path:
+        try:
+            mkdirs_url = f"{workspace_url}/api/2.0/workspace/mkdirs"
+            mkdirs_payload = {"path": folder_path}
+            mkdirs_response = requests.post(mkdirs_url, headers=headers, json=mkdirs_payload)
+            # Ignore errors if folder already exists
+        except Exception as e:
+            print(f"Note: Could not create folder {folder_path}: {str(e)}")
+    
+    # Create the dashboard (try with folder first, then without if it fails)
     create_url = f"{workspace_url}/api/2.0/lakeview/dashboards"
     create_payload = {
         "display_name": dashboard_name,
-        "parent_path": folder_path,
         "serialized_dashboard": json.dumps(dashboard_spec)
     }
     
+    # Add parent_path if folder_path is provided
+    if folder_path:
+        create_payload["parent_path"] = folder_path
+    
     response = requests.post(create_url, headers=headers, json=create_payload)
     
-    if response.status_code == 200:
+    # If failed with folder path, try without it
+    if response.status_code != 200 and response.status_code != 201 and folder_path:
+        print(f"Note: Creating dashboard without folder path (status {response.status_code})")
+        create_payload.pop("parent_path", None)
+        response = requests.post(create_url, headers=headers, json=create_payload)
+    
+    if response.status_code in [200, 201]:
         result = response.json()
         dashboard_id = result.get("dashboard_id")
         dashboard_path = result.get("path")
         
         # Publish the dashboard
-        publish_url = f"{workspace_url}/api/2.0/lakeview/dashboards/{dashboard_id}/published"
-        publish_response = requests.post(publish_url, headers=headers, json={})
+        try:
+            publish_url = f"{workspace_url}/api/2.0/lakeview/dashboards/{dashboard_id}/published"
+            publish_response = requests.post(publish_url, headers=headers, json={})
+        except Exception as e:
+            print(f"Note: Could not publish dashboard: {str(e)}")
         
         return {
             "status": "success",
@@ -70,10 +92,17 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
             "message": f"Dashboard created successfully at {dashboard_path}"
         }
     else:
+        error_detail = ""
+        try:
+            error_detail = response.json()
+        except:
+            error_detail = response.text
+        
         return {
             "status": "error",
-            "error": response.text,
-            "message": f"Failed to create dashboard: {response.status_code}"
+            "error": error_detail,
+            "status_code": response.status_code,
+            "message": f"Failed to create dashboard: {response.status_code}. Error: {error_detail}"
         }
 
 
