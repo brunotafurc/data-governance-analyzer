@@ -560,28 +560,38 @@ def check_scim_aim_provisioning():
         detected_methods = []
         
         # Check for groups with external IDs (SCIM indicator)
-        print("[check_scim_aim_provisioning] Listing groups (this may take a while)...")
+        # Use sampling to avoid timeout on large workspaces
+        MAX_GROUPS_TO_CHECK = 100
+        print(f"[check_scim_aim_provisioning] Listing groups (sampling up to {MAX_GROUPS_TO_CHECK})...")
         try:
-            groups = list(w.groups.list())
-            print(f"[check_scim_aim_provisioning] Found {len(groups)} groups")
-            for group in groups:
+            group_count = 0
+            for group in w.groups.list():
+                group_count += 1
                 # External ID indicates SCIM sync from IdP
                 if hasattr(group, 'external_id') and group.external_id:
                     identity_indicators["scim_groups"] += 1
-            print(f"[check_scim_aim_provisioning] Groups with external IDs: {identity_indicators['scim_groups']}")
+                if group_count >= MAX_GROUPS_TO_CHECK:
+                    print(f"[check_scim_aim_provisioning] Reached {MAX_GROUPS_TO_CHECK} groups limit, stopping enumeration")
+                    break
+            print(f"[check_scim_aim_provisioning] Checked {group_count} groups, {identity_indicators['scim_groups']} have external IDs")
         except Exception as e:
             print(f"[check_scim_aim_provisioning] Error listing groups: {e}")
         
         # Check for users with external IDs (SCIM indicator)
-        print("[check_scim_aim_provisioning] Listing users (this may take a while)...")
+        # Use sampling to avoid timeout on large workspaces
+        MAX_USERS_TO_CHECK = 100
+        print(f"[check_scim_aim_provisioning] Listing users (sampling up to {MAX_USERS_TO_CHECK})...")
         try:
-            users = list(w.users.list())
-            print(f"[check_scim_aim_provisioning] Found {len(users)} users")
-            for user in users:
+            user_count = 0
+            for user in w.users.list():
+                user_count += 1
                 # External ID indicates SCIM provisioning from IdP
                 if hasattr(user, 'external_id') and user.external_id:
                     identity_indicators["scim_users"] += 1
-            print(f"[check_scim_aim_provisioning] Users with external IDs: {identity_indicators['scim_users']}")
+                if user_count >= MAX_USERS_TO_CHECK:
+                    print(f"[check_scim_aim_provisioning] Reached {MAX_USERS_TO_CHECK} users limit, stopping enumeration")
+                    break
+            print(f"[check_scim_aim_provisioning] Checked {user_count} users, {identity_indicators['scim_users']} have external IDs")
         except Exception as e:
             print(f"[check_scim_aim_provisioning] Error listing users: {e}")
         
@@ -734,11 +744,13 @@ def check_account_admin_group():
         account_admin_groups = []
         
         # Check for groups with admin privileges
-        print("[check_account_admin_group] Listing groups (this may take a while)...")
+        # Use sampling to avoid timeout on large workspaces
+        MAX_GROUPS_TO_CHECK = 200
+        print(f"[check_account_admin_group] Listing groups (sampling up to {MAX_GROUPS_TO_CHECK})...")
         try:
-            groups = list(w.groups.list())
-            print(f"[check_account_admin_group] Found {len(groups)} groups")
-            for group in groups:
+            group_count = 0
+            for group in w.groups.list():
+                group_count += 1
                 if group.display_name:
                     name_lower = group.display_name.lower()
                     # Check for admin group naming patterns
@@ -760,16 +772,22 @@ def check_account_admin_group():
                             if 'account_admin' in role.value.lower():
                                 if group.display_name not in account_admin_groups:
                                     account_admin_groups.append(group.display_name)
-            print(f"[check_account_admin_group] Found {len(account_admin_groups)} admin groups: {account_admin_groups}")
+                
+                if group_count >= MAX_GROUPS_TO_CHECK:
+                    print(f"[check_account_admin_group] Reached {MAX_GROUPS_TO_CHECK} groups limit, stopping enumeration")
+                    break
+            print(f"[check_account_admin_group] Checked {group_count} groups, found {len(account_admin_groups)} admin groups: {account_admin_groups}")
         except Exception as e:
             print(f"[check_account_admin_group] Error listing groups: {e}")
         
         # Check for individual users with account admin
-        print("[check_account_admin_group] Listing users (this may take a while)...")
+        # Use sampling to avoid timeout on large workspaces
+        MAX_USERS_TO_CHECK = 200
+        print(f"[check_account_admin_group] Listing users (sampling up to {MAX_USERS_TO_CHECK})...")
         try:
-            users = list(w.users.list())
-            print(f"[check_account_admin_group] Found {len(users)} users")
-            for user in users:
+            user_count = 0
+            for user in w.users.list():
+                user_count += 1
                 is_admin = False
                 
                 # Check entitlements
@@ -791,7 +809,11 @@ def check_account_admin_group():
                 if is_admin:
                     user_display = user.display_name or user.user_name or "Unknown"
                     account_admin_users.append(user_display)
-            print(f"[check_account_admin_group] Found {len(account_admin_users)} admin users")
+                
+                if user_count >= MAX_USERS_TO_CHECK:
+                    print(f"[check_account_admin_group] Reached {MAX_USERS_TO_CHECK} users limit, stopping enumeration")
+                    break
+            print(f"[check_account_admin_group] Checked {user_count} users, found {len(account_admin_users)} admin users")
         except Exception as e:
             print(f"[check_account_admin_group] Error listing users: {e}")
         
@@ -800,32 +822,40 @@ def check_account_admin_group():
         try:
             account_client = _get_account_client()
             if account_client:
-                print("[check_account_admin_group] Account client available, listing account groups...")
+                print(f"[check_account_admin_group] Account client available, listing account groups (up to {MAX_GROUPS_TO_CHECK})...")
                 # Get account-level groups
                 try:
-                    account_groups = list(account_client.groups.list())
-                    print(f"[check_account_admin_group] Found {len(account_groups)} account-level groups")
-                    for group in account_groups:
+                    acct_group_count = 0
+                    for group in account_client.groups.list():
+                        acct_group_count += 1
                         if hasattr(group, 'roles') and group.roles:
                             for role in group.roles:
                                 if hasattr(role, 'value') and 'account_admin' in role.value.lower():
                                     if group.display_name not in account_admin_groups:
                                         account_admin_groups.append(group.display_name)
+                        if acct_group_count >= MAX_GROUPS_TO_CHECK:
+                            print(f"[check_account_admin_group] Reached account groups limit, stopping")
+                            break
+                    print(f"[check_account_admin_group] Checked {acct_group_count} account-level groups")
                 except Exception as e:
                     print(f"[check_account_admin_group] Error listing account groups: {e}")
                 
                 # Get account-level users with admin role
-                print("[check_account_admin_group] Listing account-level users...")
+                print(f"[check_account_admin_group] Listing account-level users (up to {MAX_USERS_TO_CHECK})...")
                 try:
-                    account_users = list(account_client.users.list())
-                    print(f"[check_account_admin_group] Found {len(account_users)} account-level users")
-                    for user in account_users:
+                    acct_user_count = 0
+                    for user in account_client.users.list():
+                        acct_user_count += 1
                         if hasattr(user, 'roles') and user.roles:
                             for role in user.roles:
                                 if hasattr(role, 'value') and 'account_admin' in role.value.lower():
                                     user_display = user.display_name or user.user_name or "Unknown"
                                     if user_display not in account_admin_users:
                                         account_admin_users.append(user_display)
+                        if acct_user_count >= MAX_USERS_TO_CHECK:
+                            print(f"[check_account_admin_group] Reached account users limit, stopping")
+                            break
+                    print(f"[check_account_admin_group] Checked {acct_user_count} account-level users")
                 except Exception as e:
                     print(f"[check_account_admin_group] Error listing account users: {e}")
             else:
@@ -942,15 +972,25 @@ def check_metastore_admin_group():
             owner_type = "unknown"
             
             # Method 1: Check if owner matches a group name
-            print("[check_metastore_admin_group] Listing groups to check if owner is a group...")
+            # Use sampling to avoid timeout on large workspaces
+            MAX_GROUPS_TO_CHECK = 200
+            print(f"[check_metastore_admin_group] Listing groups to check if owner is a group (up to {MAX_GROUPS_TO_CHECK})...")
             try:
-                groups = list(w.groups.list())
-                print(f"[check_metastore_admin_group] Found {len(groups)} groups")
-                group_names = [g.display_name for g in groups if g.display_name]
-                if metastore_owner in group_names:
-                    is_group = True
-                    owner_type = "group"
-                    print(f"[check_metastore_admin_group] Owner '{metastore_owner}' found in groups list")
+                group_count = 0
+                group_names = []
+                for g in w.groups.list():
+                    group_count += 1
+                    if g.display_name:
+                        group_names.append(g.display_name)
+                        if g.display_name == metastore_owner:
+                            is_group = True
+                            owner_type = "group"
+                            print(f"[check_metastore_admin_group] Owner '{metastore_owner}' found in groups list!")
+                            break
+                    if group_count >= MAX_GROUPS_TO_CHECK:
+                        print(f"[check_metastore_admin_group] Reached {MAX_GROUPS_TO_CHECK} groups limit, stopping enumeration")
+                        break
+                print(f"[check_metastore_admin_group] Checked {group_count} groups")
             except Exception as e:
                 print(f"[check_metastore_admin_group] Error listing groups: {e}")
             
@@ -962,21 +1002,30 @@ def check_metastore_admin_group():
                     print(f"[check_metastore_admin_group] Owner contains '@', classified as user")
                 else:
                     # Could be a group name we couldn't verify, or service principal
-                    # Check if it matches a user
-                    print(f"[check_metastore_admin_group] No '@' in owner, checking users list...")
+                    # Check if it matches a user using filter (more efficient than listing all)
+                    print(f"[check_metastore_admin_group] No '@' in owner, checking users with filter...")
                     try:
-                        users = list(w.users.list(filter=f"userName eq '{metastore_owner}'"))
-                        print(f"[check_metastore_admin_group] User lookup returned {len(users)} results")
-                        if users:
+                        # Use filter to avoid listing all users
+                        user_count = 0
+                        found_user = False
+                        for user in w.users.list(filter=f"userName eq '{metastore_owner}'"):
+                            user_count += 1
+                            found_user = True
+                            break  # Found one, that's enough
+                        print(f"[check_metastore_admin_group] User filter lookup found: {found_user}")
+                        if found_user:
                             owner_type = "user"
                         else:
                             # Not found as user, might be a group we couldn't list
                             # or a service principal
-                            print(f"[check_metastore_admin_group] Not a user, checking service principals...")
+                            print(f"[check_metastore_admin_group] Not a user, checking service principals with filter...")
                             try:
-                                sps = list(w.service_principals.list(filter=f"displayName eq '{metastore_owner}'"))
-                                print(f"[check_metastore_admin_group] Service principal lookup returned {len(sps)} results")
-                                if sps:
+                                found_sp = False
+                                for sp in w.service_principals.list(filter=f"displayName eq '{metastore_owner}'"):
+                                    found_sp = True
+                                    break  # Found one, that's enough
+                                print(f"[check_metastore_admin_group] Service principal filter lookup found: {found_sp}")
+                                if found_sp:
                                     owner_type = "service_principal"
                                 else:
                                     # Assume it's a group if not found as user or SP
