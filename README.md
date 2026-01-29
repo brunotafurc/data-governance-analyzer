@@ -4,14 +4,31 @@ Evaluates Unity Catalog governance best practices across 25 checks in 6 categori
 
 ## Setup
 
-1. Upload `governance_analyzer.py` to your Databricks workspace
-2. Import `governance_analysis.ipynb` as a notebook
-3. Update catalog/schema names in the notebook (default: `main.default`)
-4. Run the notebook to execute all checks
+1. Import this project to your Databricks workspace
+2. Run the `governance_analysis.ipynb` notebook with optional parameters:
+   - `catalog_name` (default: `main`) - Target catalog for results table
+   - `schema_name` (default: `default`) - Target schema for results table
+
+## Usage
+
+### Interactive Mode
+When running the notebook interactively, widgets will appear at the top:
+- Set `catalog_name` to your target catalog (default: `main`)
+- Set `schema_name` to your target schema (default: `default`)
+
+### Programmatic/Job Mode
+Pass parameters when running as a job:
+```python
+dbutils.notebook.run(
+    "governance_analysis",
+    timeout_seconds=600,
+    arguments={"catalog_name": "my_catalog", "schema_name": "my_schema"}
+)
+```
 
 ## Results
 
-- Results saved to `governance_results` Delta table
+- Results saved to `{catalog}.{schema}.governance_results` Delta table
 - Summary by category with pass rates and scores
 - Overall governance score calculation
 
