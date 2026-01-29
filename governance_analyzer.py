@@ -677,8 +677,8 @@ def check_account_admin_group():
     """
     Check if Account Admin role is assigned to a group rather than individual users.
     
-    Best practice is to assign administrative roles to groups, not individuals,
-    to ensure proper access management and easier role transitions.
+    Uses the account-level role assignments API to directly query who has the 
+    account_admin role, which is more efficient than iterating through all groups/users.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -686,132 +686,73 @@ def check_account_admin_group():
     print("[check_account_admin_group] Starting check...")
     
     try:
-        print("[check_account_admin_group] Getting workspace client...")
-        w = _get_workspace_client()
-        print("[check_account_admin_group] Workspace client obtained")
+        import os
+        
+        print("[check_account_admin_group] Getting account client...")
+        account_client = _get_account_client()
+        
+        if not account_client:
+            print("[check_account_admin_group] No account client available")
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Cannot check Account Admin assignments: Account-level credentials not configured. Set DATABRICKS_ACCOUNT_HOST and DATABRICKS_ACCOUNT_ID environment variables."
+            }
+        
+        print("[check_account_admin_group] Account client obtained")
         
         account_admin_users = []
         account_admin_groups = []
+        account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
         
-        # Check for groups with admin privileges
-        # Use sampling to avoid timeout on large workspaces
-        MAX_GROUPS_TO_CHECK = 200
-        print(f"[check_account_admin_group] Listing groups (sampling up to {MAX_GROUPS_TO_CHECK})...")
+        # Method 1: Use the role assignments API to directly get account admins
+        # This is the most efficient approach - queries role assignments directly
+        print("[check_account_admin_group] Querying role assignments API...")
         try:
-            group_count = 0
-            for group in w.groups.list():
-                group_count += 1
-                if group.display_name:
-                    name_lower = group.display_name.lower()
-                    # Check for admin group naming patterns
-                    if any(pattern in name_lower for pattern in ['account_admin', 'account-admin', 'accountadmin', 'account admin']):
-                        account_admin_groups.append(group.display_name)
+            if hasattr(account_client, 'api_client'):
+                # Get all principals with account_admin role
+                response = account_client.api_client.do(
+                    'GET',
+                    f'/api/2.0/accounts/{account_id}/access-control/assignable-roles'
+                )
+                print(f"[check_account_admin_group] Assignable roles response: {response}")
                 
-                # Check group entitlements/roles if available
-                if hasattr(group, 'entitlements') and group.entitlements:
-                    for entitlement in group.entitlements:
-                        if hasattr(entitlement, 'value') and entitlement.value:
-                            if 'account_admin' in entitlement.value.lower():
-                                if group.display_name not in account_admin_groups:
-                                    account_admin_groups.append(group.display_name)
-                                    
-                # Check roles if available
-                if hasattr(group, 'roles') and group.roles:
-                    for role in group.roles:
-                        if hasattr(role, 'value') and role.value:
-                            if 'account_admin' in role.value.lower():
-                                if group.display_name not in account_admin_groups:
-                                    account_admin_groups.append(group.display_name)
-                
-                if group_count >= MAX_GROUPS_TO_CHECK:
-                    print(f"[check_account_admin_group] Reached {MAX_GROUPS_TO_CHECK} groups limit, stopping enumeration")
-                    break
-            print(f"[check_account_admin_group] Checked {group_count} groups, found {len(account_admin_groups)} admin groups: {account_admin_groups}")
-        except Exception as e:
-            print(f"[check_account_admin_group] Error listing groups: {e}")
-        
-        # Check for individual users with account admin
-        # Use sampling to avoid timeout on large workspaces
-        MAX_USERS_TO_CHECK = 200
-        print(f"[check_account_admin_group] Listing users (sampling up to {MAX_USERS_TO_CHECK})...")
-        try:
-            user_count = 0
-            for user in w.users.list():
-                user_count += 1
-                is_admin = False
-                
-                # Check entitlements
-                if hasattr(user, 'entitlements') and user.entitlements:
-                    for entitlement in user.entitlements:
-                        if hasattr(entitlement, 'value') and entitlement.value:
-                            if 'account_admin' in entitlement.value.lower():
-                                is_admin = True
-                                break
-                
-                # Check roles
-                if hasattr(user, 'roles') and user.roles:
-                    for role in user.roles:
-                        if hasattr(role, 'value') and role.value:
-                            if 'account_admin' in role.value.lower():
-                                is_admin = True
-                                break
-                
-                if is_admin:
-                    user_display = user.display_name or user.user_name or "Unknown"
-                    account_admin_users.append(user_display)
-                
-                if user_count >= MAX_USERS_TO_CHECK:
-                    print(f"[check_account_admin_group] Reached {MAX_USERS_TO_CHECK} users limit, stopping enumeration")
-                    break
-            print(f"[check_account_admin_group] Checked {user_count} users, found {len(account_admin_users)} admin users")
-        except Exception as e:
-            print(f"[check_account_admin_group] Error listing users: {e}")
-        
-        # Try to use AccountClient for more accurate account-level information
-        print("[check_account_admin_group] Checking account-level client...")
-        try:
-            account_client = _get_account_client()
-            if account_client:
-                print(f"[check_account_admin_group] Account client available, listing account groups (up to {MAX_GROUPS_TO_CHECK})...")
-                # Get account-level groups
+                # Get role assignments for account_admin
                 try:
-                    acct_group_count = 0
-                    for group in account_client.groups.list():
-                        acct_group_count += 1
-                        if hasattr(group, 'roles') and group.roles:
-                            for role in group.roles:
-                                if hasattr(role, 'value') and 'account_admin' in role.value.lower():
-                                    if group.display_name not in account_admin_groups:
-                                        account_admin_groups.append(group.display_name)
-                        if acct_group_count >= MAX_GROUPS_TO_CHECK:
-                            print(f"[check_account_admin_group] Reached account groups limit, stopping")
-                            break
-                    print(f"[check_account_admin_group] Checked {acct_group_count} account-level groups")
+                    role_assignments = account_client.api_client.do(
+                        'GET',
+                        f'/api/2.0/accounts/{account_id}/access-control/role-assignments'
+                    )
+                    print(f"[check_account_admin_group] Role assignments: {role_assignments}")
+                    
+                    if role_assignments and 'role_assignments' in role_assignments:
+                        for assignment in role_assignments['role_assignments']:
+                            role_name = assignment.get('role', '')
+                            principal = assignment.get('principal', {})
+                            
+                            if 'account_admin' in role_name.lower():
+                                # Determine if principal is a user or group
+                                if principal.get('group_name'):
+                                    group_name = principal['group_name']
+                                    if group_name not in account_admin_groups:
+                                        account_admin_groups.append(group_name)
+                                        print(f"[check_account_admin_group] Found admin group: {group_name}")
+                                elif principal.get('user_name'):
+                                    user_name = principal['user_name']
+                                    if user_name not in account_admin_users:
+                                        account_admin_users.append(user_name)
+                                        print(f"[check_account_admin_group] Found admin user: {user_name}")
+                                elif principal.get('service_principal_name'):
+                                    # Service principals count as non-group assignments
+                                    sp_name = principal['service_principal_name']
+                                    if sp_name not in account_admin_users:
+                                        account_admin_users.append(f"SP: {sp_name}")
+                                        print(f"[check_account_admin_group] Found admin service principal: {sp_name}")
                 except Exception as e:
-                    print(f"[check_account_admin_group] Error listing account groups: {e}")
-                
-                # Get account-level users with admin role
-                print(f"[check_account_admin_group] Listing account-level users (up to {MAX_USERS_TO_CHECK})...")
-                try:
-                    acct_user_count = 0
-                    for user in account_client.users.list():
-                        acct_user_count += 1
-                        if hasattr(user, 'roles') and user.roles:
-                            for role in user.roles:
-                                if hasattr(role, 'value') and 'account_admin' in role.value.lower():
-                                    user_display = user.display_name or user.user_name or "Unknown"
-                                    if user_display not in account_admin_users:
-                                        account_admin_users.append(user_display)
-                        if acct_user_count >= MAX_USERS_TO_CHECK:
-                            print(f"[check_account_admin_group] Reached account users limit, stopping")
-                            break
-                    print(f"[check_account_admin_group] Checked {acct_user_count} account-level users")
-                except Exception as e:
-                    print(f"[check_account_admin_group] Error listing account users: {e}")
-            else:
-                print("[check_account_admin_group] No account client available")
+                    print(f"[check_account_admin_group] Role assignments API error: {e}")
         except Exception as e:
-            print(f"[check_account_admin_group] Error getting account client: {e}")
+            print(f"[check_account_admin_group] Access control API error: {e}")
         
         print(f"[check_account_admin_group] Final counts - Admin groups: {len(account_admin_groups)}, Admin users: {len(account_admin_users)}")
         
@@ -839,7 +780,7 @@ def check_account_admin_group():
                 "status": "fail",
                 "score": 0,
                 "max_score": 2,
-                "details": f"Account Admin assigned to {len(account_admin_users)} individual user(s) instead of groups. Create an admin group and assign the role to it."
+                "details": f"Account Admin assigned to {len(account_admin_users)} individual user(s) instead of groups: {', '.join(account_admin_users[:5])}{'...' if len(account_admin_users) > 5 else ''}. Create an admin group and assign the role to it."
             }
         else:
             print("[check_account_admin_group] WARNING - Could not detect admin assignments")
@@ -871,8 +812,8 @@ def check_metastore_admin_group():
     """
     Check if Metastore Admin role is assigned to a group rather than individual users.
     
-    Best practice is to assign the metastore admin (owner) role to a group, not an individual,
-    to ensure proper access management and easier role transitions.
+    Gets the owner directly from the metastore object and uses SCIM filters to 
+    determine if the owner is a group, user, or service principal.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -899,11 +840,9 @@ def check_metastore_admin_group():
                     "details": "No metastore connected - cannot check metastore admin"
                 }
             
-            # Get full metastore details to access owner
-            print(f"[check_metastore_admin_group] Getting metastore details for ID: {metastore_summary.metastore_id}")
-            metastore = w.metastores.get(id=metastore_summary.metastore_id)
-            metastore_owner = metastore.owner if metastore else None
-            metastore_name = metastore.name if metastore else metastore_summary.metastore_id
+            # Get owner directly from metastore - no need to iterate through groups
+            metastore_owner = metastore_summary.owner
+            metastore_name = metastore_summary.name or metastore_summary.metastore_id
             print(f"[check_metastore_admin_group] Metastore name: {metastore_name}, owner: {metastore_owner}")
             
             if not metastore_owner:
@@ -915,83 +854,43 @@ def check_metastore_admin_group():
                     "details": f"Could not determine metastore owner for '{metastore_name}'"
                 }
             
-            # Check if owner is a group or an individual user
-            # Groups typically don't have @ in their name, users do (email format)
-            # Also check against known groups in the workspace
+            # Determine owner type using SCIM filters (single API calls, no iteration)
             is_group = False
             owner_type = "unknown"
             
-            # Method 1: Check if owner matches a group name
-            # Use sampling to avoid timeout on large workspaces
-            MAX_GROUPS_TO_CHECK = 200
-            print(f"[check_metastore_admin_group] Listing groups to check if owner is a group (up to {MAX_GROUPS_TO_CHECK})...")
+            # Check if owner is a group using SCIM filter
+            print(f"[check_metastore_admin_group] Checking if owner '{metastore_owner}' is a group...")
             try:
-                group_count = 0
-                group_names = []
-                for g in w.groups.list():
-                    group_count += 1
-                    if g.display_name:
-                        group_names.append(g.display_name)
-                        if g.display_name == metastore_owner:
-                            is_group = True
-                            owner_type = "group"
-                            print(f"[check_metastore_admin_group] Owner '{metastore_owner}' found in groups list!")
-                            break
-                    if group_count >= MAX_GROUPS_TO_CHECK:
-                        print(f"[check_metastore_admin_group] Reached {MAX_GROUPS_TO_CHECK} groups limit, stopping enumeration")
-                        break
-                print(f"[check_metastore_admin_group] Checked {group_count} groups")
+                for group in w.groups.list(filter=f'displayName eq "{metastore_owner}"'):
+                    is_group = True
+                    owner_type = "group"
+                    print(f"[check_metastore_admin_group] Owner found as group")
+                    break
             except Exception as e:
-                print(f"[check_metastore_admin_group] Error listing groups: {e}")
+                print(f"[check_metastore_admin_group] Group lookup error: {e}")
             
-            # Method 2: Check if owner looks like an email (individual user)
+            # If not a group, determine if it's a user or service principal
             if not is_group:
-                print(f"[check_metastore_admin_group] Owner not found in groups, checking if it's a user...")
+                # Users typically have email format with @
                 if '@' in metastore_owner:
                     owner_type = "user"
                     print(f"[check_metastore_admin_group] Owner contains '@', classified as user")
                 else:
-                    # Could be a group name we couldn't verify, or service principal
-                    # Check if it matches a user using filter (more efficient than listing all)
-                    print(f"[check_metastore_admin_group] No '@' in owner, checking users with filter...")
+                    # Check if it's a service principal using SCIM filter
+                    print(f"[check_metastore_admin_group] Checking if owner is a service principal...")
                     try:
-                        # Use filter to avoid listing all users
-                        user_count = 0
-                        found_user = False
-                        for user in w.users.list(filter=f"userName eq '{metastore_owner}'"):
-                            user_count += 1
-                            found_user = True
-                            break  # Found one, that's enough
-                        print(f"[check_metastore_admin_group] User filter lookup found: {found_user}")
-                        if found_user:
-                            owner_type = "user"
-                        else:
-                            # Not found as user, might be a group we couldn't list
-                            # or a service principal
-                            print(f"[check_metastore_admin_group] Not a user, checking service principals with filter...")
-                            try:
-                                found_sp = False
-                                for sp in w.service_principals.list(filter=f"displayName eq '{metastore_owner}'"):
-                                    found_sp = True
-                                    break  # Found one, that's enough
-                                print(f"[check_metastore_admin_group] Service principal filter lookup found: {found_sp}")
-                                if found_sp:
-                                    owner_type = "service_principal"
-                                else:
-                                    # Assume it's a group if not found as user or SP
-                                    is_group = True
-                                    owner_type = "group"
-                                    print(f"[check_metastore_admin_group] Not found as user or SP, assuming group")
-                            except Exception as e:
-                                # If we can't check, assume it might be a group
-                                print(f"[check_metastore_admin_group] Error checking SPs: {e}, assuming group")
-                                is_group = True
-                                owner_type = "group"
+                        for sp in w.service_principals.list(filter=f'displayName eq "{metastore_owner}"'):
+                            owner_type = "service_principal"
+                            print(f"[check_metastore_admin_group] Owner found as service principal")
+                            break
                     except Exception as e:
-                        # If user lookup fails and no @ sign, likely a group
-                        print(f"[check_metastore_admin_group] Error checking users: {e}, assuming group")
+                        print(f"[check_metastore_admin_group] Service principal lookup error: {e}")
+                    
+                    # If still unknown and no @, it's likely a group we couldn't find
+                    if owner_type == "unknown":
                         is_group = True
                         owner_type = "group"
+                        print(f"[check_metastore_admin_group] Owner not found as user/SP, assuming group")
             
             print(f"[check_metastore_admin_group] Final determination: is_group={is_group}, owner_type={owner_type}")
             
