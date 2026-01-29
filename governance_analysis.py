@@ -24,6 +24,11 @@ print(f"Using schema: {schema_name}")
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## 1. Save scores to delta table
+
+# COMMAND ----------
+
 import governance_analyzer as ga
 from datetime import datetime
 from pyspark.sql import SparkSession
@@ -99,11 +104,16 @@ full_table_name = f"{catalog_name}.{schema_name}.{table_name}"
 
 df.write \
     .format("delta") \
-    .mode("append") \
+    .mode("overwrite") \
     .option("mergeSchema", "true") \
     .saveAsTable(full_table_name)
 
 print(f"✓ Results saved to {full_table_name}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2. Deploy Dashboard
 
 # COMMAND ----------
 
@@ -169,63 +179,3 @@ except Exception as e:
     print(f"  1. Download dashboard_template.lvdash.json from this workspace")
     print(f"  2. Go to SQL Workspace → Dashboards → Import")
     print(f"  3. Upload the file and update the dataset query to: {catalog_name}.{schema_name}.governance_results")
-
-# COMMAND ----------
-
-# Calculate summary statistics
-summary_df = spark.sql(f"""
-    SELECT 
-        category,
-        COUNT(*) as total_checks,
-        SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) as passed_checks,
-        SUM(score) as achieved_score,
-        SUM(max_score) as total_possible_score,
-        ROUND(SUM(score) * 100.0 / NULLIF(SUM(max_score), 0), 2) as score_percentage,
-        ROUND(SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as pass_rate
-    FROM {full_table_name}
-    WHERE timestamp = (SELECT MAX(timestamp) FROM {full_table_name})
-    GROUP BY category
-    ORDER BY category
-""")
-
-display(summary_df)
-
-# COMMAND ----------
-
-# Overall governance score
-overall_df = spark.sql(f"""
-    SELECT 
-        COUNT(*) as total_checks,
-        SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) as passed_checks,
-        SUM(score) as achieved_score,
-        SUM(max_score) as total_possible_score,
-        ROUND(SUM(score) * 100.0 / NULLIF(SUM(max_score), 0), 2) as score_percentage,
-        ROUND(SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as pass_rate
-    FROM {full_table_name}
-    WHERE timestamp = (SELECT MAX(timestamp) FROM {full_table_name})
-""")
-
-display(overall_df)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Dashboard
-# MAGIC
-# MAGIC A Lakeview Dashboard has been automatically created at `/Shared/Governance/` with the following visualizations:
-# MAGIC
-# MAGIC - **Total Checks Counter**: Shows the total number of governance checks performed
-# MAGIC - **Total Score Counter**: Displays the aggregated governance score
-# MAGIC - **Pass Rate Counter**: Shows the percentage of checks that passed
-# MAGIC - **Average Score by Category**: Bar chart showing performance across categories
-# MAGIC - **Status Distribution**: Pie chart showing pass/fail distribution
-# MAGIC - **Detailed Results Table**: Full table with all governance check results
-# MAGIC
-# MAGIC ### Manual Import (if automatic creation failed)
-# MAGIC
-# MAGIC If the dashboard wasn't created automatically, you can manually import it:
-# MAGIC
-# MAGIC 1. Go to **SQL Workspace** in Databricks
-# MAGIC 2. Click **Dashboards** → **Create Dashboard** → **Import Dashboard**
-# MAGIC 3. Upload the `dashboard_template.lvdash.json` file from this project
-# MAGIC 4. Update the dataset query to point to your table: `{catalog}.{schema}.governance_results`
