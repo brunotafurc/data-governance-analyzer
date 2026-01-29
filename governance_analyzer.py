@@ -534,13 +534,11 @@ def check_metastore_region():
 
 def check_scim_aim_provisioning():
     """
-    Check if SCIM or AIM (Automatic Identity Management) is used for identity provisioning.
+    Check if SCIM provisioning is enabled at the account level.
     
-    Verifies that the workspace uses automated identity provisioning through:
-    - SCIM: System for Cross-domain Identity Management (syncs from external IdP like 
-      Azure AD, Okta, OneLogin to Databricks)
-    - AIM: Automatic Identity Management (Databricks feature that automatically syncs 
-      identities from the account level to workspaces)
+    Verifies that SCIM (System for Cross-domain Identity Management) is enabled
+    in the account settings, which allows automated identity provisioning from 
+    external IdPs like Azure AD, Okta, OneLogin to Databricks.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -548,161 +546,113 @@ def check_scim_aim_provisioning():
     print("[check_scim_aim_provisioning] Starting check...")
     
     try:
-        print("[check_scim_aim_provisioning] Getting workspace client...")
-        w = _get_workspace_client()
-        print("[check_scim_aim_provisioning] Workspace client obtained")
+        import os
         
-        identity_indicators = {
-            "scim_groups": 0,           # Groups with external IDs (SCIM synced)
-            "scim_users": 0,            # Users with external IDs (SCIM synced)
-        }
+        print("[check_scim_aim_provisioning] Getting account client...")
+        account_client = _get_account_client()
         
-        detected_methods = []
+        if not account_client:
+            print("[check_scim_aim_provisioning] No account client available")
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 3,
+                "details": "Cannot check SCIM provisioning: Account-level credentials not configured. Set DATABRICKS_ACCOUNT_HOST and DATABRICKS_ACCOUNT_ID environment variables."
+            }
         
-        # Check for groups with external IDs (SCIM indicator)
-        # Use sampling to avoid timeout on large workspaces
-        MAX_GROUPS_TO_CHECK = 100
-        print(f"[check_scim_aim_provisioning] Listing groups (sampling up to {MAX_GROUPS_TO_CHECK})...")
-        try:
-            group_count = 0
-            for group in w.groups.list():
-                group_count += 1
-                # External ID indicates SCIM sync from IdP
-                if hasattr(group, 'external_id') and group.external_id:
-                    identity_indicators["scim_groups"] += 1
-                if group_count >= MAX_GROUPS_TO_CHECK:
-                    print(f"[check_scim_aim_provisioning] Reached {MAX_GROUPS_TO_CHECK} groups limit, stopping enumeration")
-                    break
-            print(f"[check_scim_aim_provisioning] Checked {group_count} groups, {identity_indicators['scim_groups']} have external IDs")
-        except Exception as e:
-            print(f"[check_scim_aim_provisioning] Error listing groups: {e}")
+        print("[check_scim_aim_provisioning] Account client obtained, checking SCIM setting...")
         
-        # Check for users with external IDs (SCIM indicator)
-        # Use sampling to avoid timeout on large workspaces
-        MAX_USERS_TO_CHECK = 100
-        print(f"[check_scim_aim_provisioning] Listing users (sampling up to {MAX_USERS_TO_CHECK})...")
-        try:
-            user_count = 0
-            for user in w.users.list():
-                user_count += 1
-                # External ID indicates SCIM provisioning from IdP
-                if hasattr(user, 'external_id') and user.external_id:
-                    identity_indicators["scim_users"] += 1
-                if user_count >= MAX_USERS_TO_CHECK:
-                    print(f"[check_scim_aim_provisioning] Reached {MAX_USERS_TO_CHECK} users limit, stopping enumeration")
-                    break
-            print(f"[check_scim_aim_provisioning] Checked {user_count} users, {identity_indicators['scim_users']} have external IDs")
-        except Exception as e:
-            print(f"[check_scim_aim_provisioning] Error listing users: {e}")
+        scim_enabled = False
+        scim_status = "unknown"
         
-        # Check AIM status via account settings API
-        aim_enabled = False
-        aim_status = "unknown"
+        # Check SCIM provisioning setting at account level
+        account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
         
-        print("[check_scim_aim_provisioning] Checking AIM status...")
-        try:
-            account_client = _get_account_client()
-            if account_client:
-                print("[check_scim_aim_provisioning] Account client obtained, checking settings...")
+        if account_id and hasattr(account_client, 'api_client'):
+            try:
+                # Check if SCIM provisioning is enabled via account settings API
+                # The SCIM toggle is typically under identity/provisioning settings
+                response = account_client.api_client.do(
+                    'GET',
+                    f'/api/2.0/accounts/{account_id}/scim/v2/ServiceProviderConfig'
+                )
+                if response:
+                    # If we can access SCIM config, it means SCIM is enabled
+                    scim_enabled = True
+                    scim_status = "enabled"
+                    print(f"[check_scim_aim_provisioning] SCIM ServiceProviderConfig accessible, SCIM is enabled")
+            except Exception as e:
+                error_msg = str(e).lower()
+                print(f"[check_scim_aim_provisioning] SCIM ServiceProviderConfig check: {e}")
+                
+                # Try alternative endpoint for SCIM status
                 try:
-                    # AIM setting is in account settings under "automatic_identity_management"
-                    # API: GET /api/2.0/accounts/{account_id}/settings
-                    # or via SDK: account_client.settings.get_automatic_identity_management()
-                    
-                    # Try the settings API
-                    if hasattr(account_client, 'settings'):
-                        # Check for automatic identity management setting
-                        try:
-                            aim_setting = account_client.settings.get_personal_compute_setting()
-                            # This is a placeholder - the actual API might differ
-                        except:
-                            pass
-                        
-                        # Try to read the AIM setting directly
-                        try:
-                            # The setting might be under different names depending on SDK version
-                            settings = account_client.settings
-                            if hasattr(settings, 'get_automatic_cluster_update_setting'):
-                                # SDK v0.20+ has different settings methods
-                                pass
-                        except:
-                            pass
-                    
-                    # Alternative: Use REST API directly to check AIM setting
-                    import os
-                    account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
-                    if account_id and hasattr(account_client, 'api_client'):
-                        try:
-                            response = account_client.api_client.do(
-                                'GET',
-                                f'/api/2.0/accounts/{account_id}/settings/types/automatic_identity_management/names/default'
-                            )
-                            if response and response.get('automatic_identity_management_setting'):
-                                aim_value = response['automatic_identity_management_setting'].get('value', {})
-                                aim_enabled = aim_value.get('enabled', False)
-                                aim_status = "enabled" if aim_enabled else "disabled"
-                                print(f"[check_scim_aim_provisioning] AIM status: {aim_status}")
-                        except:
-                            pass
-                except Exception as e:
-                    print(f"[check_scim_aim_provisioning] Error checking account settings: {e}")
-            else:
-                print("[check_scim_aim_provisioning] No account client available")
-        except Exception as e:
-            print(f"[check_scim_aim_provisioning] Error getting account client: {e}")
+                    response = account_client.api_client.do(
+                        'GET',
+                        f'/api/2.0/accounts/{account_id}/settings/types/scim_provisioning/names/default'
+                    )
+                    if response:
+                        scim_setting = response.get('scim_provisioning_setting', {})
+                        scim_value = scim_setting.get('value', {})
+                        scim_enabled = scim_value.get('enabled', False)
+                        scim_status = "enabled" if scim_enabled else "disabled"
+                        print(f"[check_scim_aim_provisioning] SCIM provisioning setting: {scim_status}")
+                except Exception as e2:
+                    print(f"[check_scim_aim_provisioning] Alternative SCIM check: {e2}")
+        
+        # If we still don't have a definitive answer, try checking if SCIM apps exist
+        if scim_status == "unknown":
+            try:
+                # Check for SCIM applications/tokens at account level
+                response = account_client.api_client.do(
+                    'GET',
+                    f'/api/2.0/accounts/{account_id}/scim/v2/Users',
+                    {'count': 1}  # Just check if endpoint is accessible
+                )
+                if response is not None:
+                    scim_enabled = True
+                    scim_status = "enabled"
+                    print("[check_scim_aim_provisioning] SCIM Users endpoint accessible, SCIM is enabled")
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "forbidden" in error_msg or "unauthorized" in error_msg:
+                    # SCIM endpoint exists but we don't have permission - still means SCIM is configured
+                    scim_enabled = True
+                    scim_status = "enabled"
+                    print("[check_scim_aim_provisioning] SCIM endpoint exists (permission denied), SCIM is enabled")
+                elif "not found" in error_msg or "disabled" in error_msg:
+                    scim_enabled = False
+                    scim_status = "disabled"
+                    print("[check_scim_aim_provisioning] SCIM endpoint not found/disabled")
+                else:
+                    print(f"[check_scim_aim_provisioning] SCIM Users check error: {e}")
         
         # Evaluate results
-        scim_total = identity_indicators["scim_groups"] + identity_indicators["scim_users"]
-        print(f"[check_scim_aim_provisioning] Total SCIM indicators: {scim_total}, AIM enabled: {aim_enabled}")
+        print(f"[check_scim_aim_provisioning] Final status: scim_enabled={scim_enabled}, scim_status={scim_status}")
         
-        # Determine which methods are detected
-        if scim_total > 0:
-            detected_methods.append(f"SCIM ({identity_indicators['scim_groups']} groups, {identity_indicators['scim_users']} users with external IDs)")
-        
-        if aim_enabled:
-            detected_methods.append("AIM (Automatic Identity Management enabled in account settings)")
-        
-        # Score based on detection
-        if aim_enabled or scim_total >= 5:
-            # AIM enabled or strong SCIM evidence
-            details = "Identity provisioning detected: " + "; ".join(detected_methods)
-            print(f"[check_scim_aim_provisioning] PASS - {details}")
+        if scim_enabled:
+            print("[check_scim_aim_provisioning] PASS - SCIM provisioning is enabled")
             return {
                 "status": "pass",
                 "score": 3,
                 "max_score": 3,
-                "details": details
+                "details": "SCIM provisioning is enabled at the account level"
             }
-        elif scim_total > 0:
-            # SCIM detected but not extensive
-            details = "Partial identity provisioning: " + "; ".join(detected_methods)
-            if aim_status == "unknown":
-                details += ". Could not verify AIM status (requires account-level credentials)."
-            elif aim_status == "disabled":
-                details += ". Consider enabling AIM in account console."
-            print(f"[check_scim_aim_provisioning] WARNING - {details}")
+        elif scim_status == "disabled":
+            print("[check_scim_aim_provisioning] FAIL - SCIM provisioning is disabled")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 3,
+                "details": "SCIM provisioning is disabled. Enable it in Account Console > Settings > User provisioning to sync identities from your Identity Provider (Azure AD, Okta, etc.)"
+            }
+        else:
+            print("[check_scim_aim_provisioning] WARNING - Could not determine SCIM status")
             return {
                 "status": "warning",
                 "score": 1,
                 "max_score": 3,
-                "details": details
-            }
-        elif aim_status == "disabled":
-            # We could check AIM but it's disabled
-            print("[check_scim_aim_provisioning] FAIL - AIM disabled, no SCIM detected")
-            return {
-                "status": "fail",
-                "score": 0,
-                "max_score": 3,
-                "details": "AIM is disabled and no SCIM integration detected. Enable AIM in Account Console > Settings > User provisioning, or configure SCIM from your Identity Provider."
-            }
-        else:
-            print("[check_scim_aim_provisioning] FAIL - No SCIM or AIM detected")
-            return {
-                "status": "fail",
-                "score": 0,
-                "max_score": 3,
-                "details": "No SCIM or AIM integration detected. Enable SCIM provisioning from your Identity Provider (Azure AD, Okta, etc.) or enable Automatic Identity Management (AIM) in the account console."
+                "details": "Could not determine SCIM provisioning status. Verify in Account Console > Settings > User provisioning."
             }
             
     except ImportError as e:
@@ -719,7 +669,7 @@ def check_scim_aim_provisioning():
             "status": "error",
             "score": 0,
             "max_score": 3,
-            "details": f"Error checking SCIM/AIM provisioning: {str(e)}"
+            "details": f"Error checking SCIM provisioning: {str(e)}"
         }
 
 
