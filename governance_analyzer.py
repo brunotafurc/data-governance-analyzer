@@ -32,6 +32,7 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
     except:
         workspace_url = None
     
+    print("Loading dashboard template...")
     # Load dashboard template
     template_path = os.path.join(os.path.dirname(__file__), "dashboard_template.lvdash.json")
     with open(template_path, 'r') as f:
@@ -44,86 +45,98 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
     ]
     
     try:
+        print("Initializing Databricks SDK...")
         # Initialize Databricks SDK WorkspaceClient
         w = WorkspaceClient()
         
         # Ensure folder exists
+        print(f"Ensuring folder exists: {folder_path}")
         if folder_path:
             try:
                 w.workspace.mkdirs(path=folder_path)
             except Exception as e:
                 print(f"Note: Folder may already exist: {str(e)}")
         
-        # Check if dashboard already exists
-        existing_dashboard_id = None
-        expected_path = f"{folder_path}/{dashboard_name}"
+        # Try to create the dashboard directly - if it fails due to existing, we'll handle it
+        print("Preparing dashboard object...")
+        dashboard_obj = Dashboard(
+            display_name=dashboard_name,
+            parent_path=folder_path,
+            serialized_dashboard=json.dumps(dashboard_spec)
+        )
+        
+        action = "created"
+        dashboard_id = None
+        dashboard_path = None
         
         try:
-            # List all dashboards and find if one with this name exists
-            dashboards = w.lakeview.list()
-            for db in dashboards:
-                if db.display_name == dashboard_name or db.path == expected_path:
-                    existing_dashboard_id = db.dashboard_id
-                    print(f"Found existing dashboard: {db.display_name} (ID: {db.dashboard_id})")
-                    break
-        except Exception as e:
-            print(f"Note: Could not list existing dashboards: {str(e)}")
-        
-        # If dashboard exists, update it; otherwise create new
-        if existing_dashboard_id:
-            # Update existing dashboard
-            try:
-                # Get current dashboard to preserve settings
-                current = w.lakeview.get(dashboard_id=existing_dashboard_id)
-                
-                # Update with new spec
-                updated_dashboard = w.lakeview.update(
-                    dashboard_id=existing_dashboard_id,
-                    serialized_dashboard=json.dumps(dashboard_spec)
-                )
-                
-                dashboard_id = existing_dashboard_id
-                dashboard_path = updated_dashboard.path or expected_path
-                
-                # Publish the updated dashboard
-                try:
-                    w.lakeview.publish(dashboard_id=dashboard_id)
-                except Exception as e:
-                    print(f"Note: Could not publish dashboard: {str(e)}")
-                
-                action = "updated"
-            except Exception as e:
-                # If update fails, try to trash and recreate
-                print(f"Update failed, attempting to replace: {str(e)}")
-                try:
-                    w.lakeview.trash(dashboard_id=existing_dashboard_id)
-                except:
-                    pass
-                existing_dashboard_id = None  # Force creation
-        
-        if not existing_dashboard_id:
-            # Create new dashboard
-            dashboard_obj = Dashboard(
-                display_name=dashboard_name,
-                parent_path=folder_path,
-                serialized_dashboard=json.dumps(dashboard_spec)
-            )
-            
-            # Create draft dashboard
+            # Try to create new dashboard
+            print("Calling lakeview.create()...")
             created_dashboard = w.lakeview.create(
                 dashboard=dashboard_obj
             )
+            print("Dashboard created successfully")
             
             dashboard_id = created_dashboard.dashboard_id
             dashboard_path = created_dashboard.path
             
-            # Publish the dashboard
+        except Exception as create_error:
+            # If creation fails due to existing dashboard, try to find and update it
+            error_msg = str(create_error)
+            print(f"Create failed: {error_msg}")
+            if "already exists" in error_msg.lower():
+                print(f"Dashboard exists, searching for it to update...")
+                
+                # Extract dashboard ID from error if possible
+                import re
+                id_match = re.search(r'dashboards/([a-f0-9]+)', error_msg)
+                if id_match:
+                    dashboard_id = id_match.group(1)
+                    print(f"Found dashboard ID from error: {dashboard_id}")
+                else:
+                    # Try to find by listing (with limit to avoid timeout)
+                    print("Listing dashboards to find existing one...")
+                    try:
+                        count = 0
+                        for db in w.lakeview.list():
+                            count += 1
+                            if db.display_name == dashboard_name:
+                                dashboard_id = db.dashboard_id
+                                print(f"Found dashboard by name: {dashboard_id}")
+                                break
+                            if count >= 50:  # Limit search to avoid timeout
+                                print(f"Searched {count} dashboards, stopping...")
+                                break
+                    except Exception as list_error:
+                        print(f"Listing failed: {str(list_error)}")
+                
+                if dashboard_id:
+                    # Update existing dashboard
+                    print(f"Updating dashboard {dashboard_id}...")
+                    try:
+                        updated_dashboard = w.lakeview.update(
+                            dashboard_id=dashboard_id,
+                            serialized_dashboard=json.dumps(dashboard_spec)
+                        )
+                        dashboard_path = updated_dashboard.path
+                        action = "updated"
+                        print("Dashboard updated successfully")
+                    except Exception as update_error:
+                        raise Exception(f"Could not update existing dashboard: {str(update_error)}")
+                else:
+                    raise Exception(f"Dashboard exists but could not find ID to update: {error_msg}")
+            else:
+                # Re-raise if not an "already exists" error
+                raise
+        
+        # Publish the dashboard
+        if dashboard_id:
+            print(f"Publishing dashboard {dashboard_id}...")
             try:
                 w.lakeview.publish(dashboard_id=dashboard_id)
+                print("Dashboard published successfully")
             except Exception as e:
                 print(f"Note: Could not publish dashboard: {str(e)}")
-            
-            action = "created"
         
         # Build dashboard URL
         if workspace_url:
@@ -134,9 +147,9 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
         return {
             "status": "success",
             "dashboard_id": dashboard_id,
-            "dashboard_path": dashboard_path,
+            "dashboard_path": dashboard_path or f"{folder_path}/{dashboard_name}",
             "workspace_url": dashboard_url,
-            "message": f"Dashboard {action} successfully at {dashboard_path}"
+            "message": f"Dashboard {action} successfully at {dashboard_path or folder_path}"
         }
         
     except Exception as e:

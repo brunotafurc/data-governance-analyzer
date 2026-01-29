@@ -109,14 +109,43 @@ print(f"✓ Results saved to {full_table_name}")
 
 # Deploy Lakeview Dashboard
 print("Creating Lakeview Dashboard...")
+print("Note: This may take up to 30 seconds...")
+
+import threading
+import time
+
+def create_dashboard_with_timeout():
+    result = {"status": "timeout", "message": "Dashboard creation timed out after 30 seconds"}
+    
+    def run_creation():
+        nonlocal result
+        try:
+            result = ga.create_dashboard(
+                catalog_name=catalog_name,
+                schema_name=schema_name,
+                folder_path="/Shared/Governance",
+                dashboard_name=f"Governance Results Dashboard - {catalog_name}.{schema_name}"
+            )
+        except Exception as e:
+            result = {
+                "status": "error",
+                "message": str(e),
+                "error": str(e)
+            }
+    
+    thread = threading.Thread(target=run_creation)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout=30)  # 30 second timeout
+    
+    if thread.is_alive():
+        print("⚠ Dashboard creation is taking too long and was stopped")
+        return {"status": "timeout", "message": "Operation timed out"}
+    
+    return result
 
 try:
-    dashboard_result = ga.create_dashboard(
-        catalog_name=catalog_name,
-        schema_name=schema_name,
-        folder_path="/Shared/Governance",
-        dashboard_name=f"Governance Results Dashboard - {catalog_name}.{schema_name}"
-    )
+    dashboard_result = create_dashboard_with_timeout()
     
     if dashboard_result["status"] == "success":
         print(f"✓ {dashboard_result['message']}")
