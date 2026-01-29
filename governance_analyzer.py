@@ -81,54 +81,58 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
             dashboard_path = created_dashboard.path
             
         except Exception as create_error:
-            # If creation fails due to existing dashboard, try to find and update it
+            # If creation fails due to existing dashboard, try to delete the workspace node
             error_msg = str(create_error)
             print(f"Create failed: {error_msg}")
             if "already exists" in error_msg.lower():
-                print(f"Dashboard exists, searching for it to update...")
+                print(f"Dashboard file exists in workspace, attempting to delete it...")
                 
-                # Extract dashboard ID from error if possible
-                import re
-                id_match = re.search(r'dashboards/([a-f0-9]+)', error_msg)
-                if id_match:
-                    dashboard_id = id_match.group(1)
-                    print(f"Found dashboard ID from error: {dashboard_id}")
-                else:
-                    # Try to find by listing (with limit to avoid timeout)
+                # Try to delete the workspace file directly
+                dashboard_file_path = f"{folder_path}/{dashboard_name}.lvdash.json"
+                try:
+                    print(f"Deleting workspace file: {dashboard_file_path}")
+                    w.workspace.delete(path=dashboard_file_path)
+                    print("Workspace file deleted successfully")
+                    
+                    # Now try to create the dashboard again
+                    print("Retrying dashboard creation...")
+                    created_dashboard = w.lakeview.create(
+                        dashboard=dashboard_obj
+                    )
+                    dashboard_id = created_dashboard.dashboard_id
+                    dashboard_path = created_dashboard.path
+                    action = "replaced"
+                    print("Dashboard created successfully after removing old file")
+                    
+                except Exception as delete_error:
+                    print(f"Could not delete workspace file: {str(delete_error)}")
+                    
+                    # Fallback: try to find dashboard by listing
                     print("Listing dashboards to find existing one...")
                     try:
                         count = 0
+                        found_dashboard = None
                         for db in w.lakeview.list():
                             count += 1
                             if db.display_name == dashboard_name:
-                                dashboard_id = db.dashboard_id
-                                print(f"Found dashboard by name: {dashboard_id}")
+                                found_dashboard = db
+                                print(f"Found existing dashboard: {db.display_name} (ID: {db.dashboard_id})")
                                 break
                             if count >= 50:  # Limit search to avoid timeout
                                 print(f"Searched {count} dashboards, stopping...")
                                 break
-                    except Exception as list_error:
-                        print(f"Listing failed: {str(list_error)}")
-                
-                if dashboard_id:
-                    # Trash the old dashboard and recreate
-                    print(f"Trashing old dashboard {dashboard_id}...")
-                    try:
-                        w.lakeview.trash(dashboard_id=dashboard_id)
-                        print("Old dashboard trashed, creating new one...")
                         
-                        # Now create the new dashboard
-                        created_dashboard = w.lakeview.create(
-                            dashboard=dashboard_obj
-                        )
-                        dashboard_id = created_dashboard.dashboard_id
-                        dashboard_path = created_dashboard.path
-                        action = "replaced"
-                        print("Dashboard replaced successfully")
-                    except Exception as replace_error:
-                        raise Exception(f"Could not replace existing dashboard: {str(replace_error)}")
-                else:
-                    raise Exception(f"Dashboard exists but could not find ID to update: {error_msg}")
+                        if found_dashboard:
+                            # Just return the existing dashboard info
+                            dashboard_id = found_dashboard.dashboard_id
+                            dashboard_path = found_dashboard.path
+                            action = "found existing"
+                            print(f"Using existing dashboard: {dashboard_id}")
+                        else:
+                            raise Exception(f"Dashboard exists but could not be found or deleted: {error_msg}")
+                            
+                    except Exception as list_error:
+                        raise Exception(f"Could not resolve dashboard conflict: {str(list_error)}")
             else:
                 # Re-raise if not an "already exists" error
                 raise
