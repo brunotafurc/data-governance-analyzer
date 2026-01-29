@@ -207,15 +207,22 @@ def check_metastore_connected():
     Returns:
         dict: Status with score, max_score, and details
     """
+    print("[check_metastore_connected] Starting check...")
+    
     try:
+        print("[check_metastore_connected] Getting workspace client...")
         w = _get_workspace_client()
+        print("[check_metastore_connected] Workspace client obtained")
         
         # Get current metastore assignment for the workspace
         try:
+            print("[check_metastore_connected] Fetching metastore summary...")
             metastore_summary = w.metastores.summary()
+            print(f"[check_metastore_connected] Metastore summary received: {metastore_summary}")
             
             if metastore_summary and metastore_summary.metastore_id:
                 metastore_name = metastore_summary.name or metastore_summary.metastore_id
+                print(f"[check_metastore_connected] PASS - Metastore connected: {metastore_name}")
                 return {
                     "status": "pass",
                     "score": 3,
@@ -223,6 +230,7 @@ def check_metastore_connected():
                     "details": f"Metastore '{metastore_name}' connected (ID: {metastore_summary.metastore_id})"
                 }
             else:
+                print("[check_metastore_connected] FAIL - No metastore connected")
                 return {
                     "status": "fail",
                     "score": 0,
@@ -230,6 +238,7 @@ def check_metastore_connected():
                     "details": "No metastore connected to workspace"
                 }
         except Exception as e:
+            print(f"[check_metastore_connected] Exception: {e}")
             error_msg = str(e).lower()
             if "not found" in error_msg or "no metastore" in error_msg or "not assigned" in error_msg:
                 return {
@@ -241,6 +250,7 @@ def check_metastore_connected():
             raise
             
     except ImportError as e:
+        print(f"[check_metastore_connected] ImportError: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -248,6 +258,7 @@ def check_metastore_connected():
             "details": str(e)
         }
     except Exception as e:
+        print(f"[check_metastore_connected] Unexpected error: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -410,14 +421,21 @@ def check_metastore_region():
     Returns:
         dict: Status with score, max_score, and details
     """
+    print("[check_metastore_region] Starting check...")
+    
     try:
+        print("[check_metastore_region] Getting workspace client...")
         w = _get_workspace_client()
+        print("[check_metastore_region] Workspace client obtained")
         
         # Get metastore details including region
         try:
+            print("[check_metastore_region] Fetching metastore summary...")
             metastore_summary = w.metastores.summary()
+            print(f"[check_metastore_region] Metastore summary: {metastore_summary}")
             
             if not metastore_summary or not metastore_summary.metastore_id:
+                print("[check_metastore_region] No metastore connected")
                 return {
                     "status": "fail",
                     "score": 0,
@@ -426,11 +444,15 @@ def check_metastore_region():
                 }
             
             # Get full metastore details to access region
+            print(f"[check_metastore_region] Getting metastore details for ID: {metastore_summary.metastore_id}")
             metastore = w.metastores.get(id=metastore_summary.metastore_id)
             metastore_region = metastore.region if metastore else None
+            print(f"[check_metastore_region] Metastore region: {metastore_region}")
             
             # Get workspace region using helper function
+            print("[check_metastore_region] Detecting workspace region...")
             workspace_region = _get_workspace_region(w)
+            print(f"[check_metastore_region] Workspace region: {workspace_region}")
             
             if metastore_region:
                 # Normalize region names for comparison
@@ -446,6 +468,7 @@ def check_metastore_region():
                     
                     if (metastore_region_normalized == workspace_region_normalized or 
                         metastore_clean == workspace_clean):
+                        print(f"[check_metastore_region] PASS - Regions match: {metastore_region}")
                         return {
                             "status": "pass",
                             "score": 2,
@@ -453,6 +476,7 @@ def check_metastore_region():
                             "details": f"Metastore and workspace both in region: {metastore_region}"
                         }
                     else:
+                        print(f"[check_metastore_region] FAIL - Region mismatch")
                         return {
                             "status": "fail",
                             "score": 0,
@@ -462,6 +486,7 @@ def check_metastore_region():
                 else:
                     # Cannot determine workspace region, report metastore region
                     # This is still a pass since metastore is configured with a region
+                    print(f"[check_metastore_region] PASS - Metastore region found, workspace region unknown")
                     return {
                         "status": "pass",
                         "score": 2,
@@ -469,6 +494,7 @@ def check_metastore_region():
                         "details": f"Metastore region: {metastore_region} (workspace region could not be auto-detected, assumed same region)"
                     }
             else:
+                print("[check_metastore_region] WARNING - Could not determine metastore region")
                 return {
                     "status": "warning",
                     "score": 1,
@@ -477,6 +503,7 @@ def check_metastore_region():
                 }
                 
         except Exception as e:
+            print(f"[check_metastore_region] Exception: {e}")
             error_msg = str(e).lower()
             if "not found" in error_msg or "no metastore" in error_msg:
                 return {
@@ -488,6 +515,7 @@ def check_metastore_region():
             raise
             
     except ImportError as e:
+        print(f"[check_metastore_region] ImportError: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -495,6 +523,7 @@ def check_metastore_region():
             "details": str(e)
         }
     except Exception as e:
+        print(f"[check_metastore_region] Unexpected error: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -516,8 +545,12 @@ def check_scim_aim_provisioning():
     Returns:
         dict: Status with score, max_score, and details
     """
+    print("[check_scim_aim_provisioning] Starting check...")
+    
     try:
+        print("[check_scim_aim_provisioning] Getting workspace client...")
         w = _get_workspace_client()
+        print("[check_scim_aim_provisioning] Workspace client obtained")
         
         identity_indicators = {
             "scim_groups": 0,           # Groups with external IDs (SCIM synced)
@@ -527,32 +560,40 @@ def check_scim_aim_provisioning():
         detected_methods = []
         
         # Check for groups with external IDs (SCIM indicator)
+        print("[check_scim_aim_provisioning] Listing groups (this may take a while)...")
         try:
             groups = list(w.groups.list())
+            print(f"[check_scim_aim_provisioning] Found {len(groups)} groups")
             for group in groups:
                 # External ID indicates SCIM sync from IdP
                 if hasattr(group, 'external_id') and group.external_id:
                     identity_indicators["scim_groups"] += 1
-        except Exception:
-            pass
+            print(f"[check_scim_aim_provisioning] Groups with external IDs: {identity_indicators['scim_groups']}")
+        except Exception as e:
+            print(f"[check_scim_aim_provisioning] Error listing groups: {e}")
         
         # Check for users with external IDs (SCIM indicator)
+        print("[check_scim_aim_provisioning] Listing users (this may take a while)...")
         try:
             users = list(w.users.list())
+            print(f"[check_scim_aim_provisioning] Found {len(users)} users")
             for user in users:
                 # External ID indicates SCIM provisioning from IdP
                 if hasattr(user, 'external_id') and user.external_id:
                     identity_indicators["scim_users"] += 1
-        except Exception:
-            pass
+            print(f"[check_scim_aim_provisioning] Users with external IDs: {identity_indicators['scim_users']}")
+        except Exception as e:
+            print(f"[check_scim_aim_provisioning] Error listing users: {e}")
         
         # Check AIM status via account settings API
         aim_enabled = False
         aim_status = "unknown"
         
+        print("[check_scim_aim_provisioning] Checking AIM status...")
         try:
             account_client = _get_account_client()
             if account_client:
+                print("[check_scim_aim_provisioning] Account client obtained, checking settings...")
                 try:
                     # AIM setting is in account settings under "automatic_identity_management"
                     # API: GET /api/2.0/accounts/{account_id}/settings
@@ -590,15 +631,19 @@ def check_scim_aim_provisioning():
                                 aim_value = response['automatic_identity_management_setting'].get('value', {})
                                 aim_enabled = aim_value.get('enabled', False)
                                 aim_status = "enabled" if aim_enabled else "disabled"
+                                print(f"[check_scim_aim_provisioning] AIM status: {aim_status}")
                         except:
                             pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    print(f"[check_scim_aim_provisioning] Error checking account settings: {e}")
+            else:
+                print("[check_scim_aim_provisioning] No account client available")
+        except Exception as e:
+            print(f"[check_scim_aim_provisioning] Error getting account client: {e}")
         
         # Evaluate results
         scim_total = identity_indicators["scim_groups"] + identity_indicators["scim_users"]
+        print(f"[check_scim_aim_provisioning] Total SCIM indicators: {scim_total}, AIM enabled: {aim_enabled}")
         
         # Determine which methods are detected
         if scim_total > 0:
@@ -611,6 +656,7 @@ def check_scim_aim_provisioning():
         if aim_enabled or scim_total >= 5:
             # AIM enabled or strong SCIM evidence
             details = "Identity provisioning detected: " + "; ".join(detected_methods)
+            print(f"[check_scim_aim_provisioning] PASS - {details}")
             return {
                 "status": "pass",
                 "score": 3,
@@ -624,6 +670,7 @@ def check_scim_aim_provisioning():
                 details += ". Could not verify AIM status (requires account-level credentials)."
             elif aim_status == "disabled":
                 details += ". Consider enabling AIM in account console."
+            print(f"[check_scim_aim_provisioning] WARNING - {details}")
             return {
                 "status": "warning",
                 "score": 1,
@@ -632,6 +679,7 @@ def check_scim_aim_provisioning():
             }
         elif aim_status == "disabled":
             # We could check AIM but it's disabled
+            print("[check_scim_aim_provisioning] FAIL - AIM disabled, no SCIM detected")
             return {
                 "status": "fail",
                 "score": 0,
@@ -639,6 +687,7 @@ def check_scim_aim_provisioning():
                 "details": "AIM is disabled and no SCIM integration detected. Enable AIM in Account Console > Settings > User provisioning, or configure SCIM from your Identity Provider."
             }
         else:
+            print("[check_scim_aim_provisioning] FAIL - No SCIM or AIM detected")
             return {
                 "status": "fail",
                 "score": 0,
@@ -647,6 +696,7 @@ def check_scim_aim_provisioning():
             }
             
     except ImportError as e:
+        print(f"[check_scim_aim_provisioning] ImportError: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -654,6 +704,7 @@ def check_scim_aim_provisioning():
             "details": str(e)
         }
     except Exception as e:
+        print(f"[check_scim_aim_provisioning] Unexpected error: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -672,15 +723,21 @@ def check_account_admin_group():
     Returns:
         dict: Status with score, max_score, and details
     """
+    print("[check_account_admin_group] Starting check...")
+    
     try:
+        print("[check_account_admin_group] Getting workspace client...")
         w = _get_workspace_client()
+        print("[check_account_admin_group] Workspace client obtained")
         
         account_admin_users = []
         account_admin_groups = []
         
         # Check for groups with admin privileges
+        print("[check_account_admin_group] Listing groups (this may take a while)...")
         try:
             groups = list(w.groups.list())
+            print(f"[check_account_admin_group] Found {len(groups)} groups")
             for group in groups:
                 if group.display_name:
                     name_lower = group.display_name.lower()
@@ -703,12 +760,15 @@ def check_account_admin_group():
                             if 'account_admin' in role.value.lower():
                                 if group.display_name not in account_admin_groups:
                                     account_admin_groups.append(group.display_name)
+            print(f"[check_account_admin_group] Found {len(account_admin_groups)} admin groups: {account_admin_groups}")
         except Exception as e:
-            pass
+            print(f"[check_account_admin_group] Error listing groups: {e}")
         
         # Check for individual users with account admin
+        print("[check_account_admin_group] Listing users (this may take a while)...")
         try:
             users = list(w.users.list())
+            print(f"[check_account_admin_group] Found {len(users)} users")
             for user in users:
                 is_admin = False
                 
@@ -731,28 +791,34 @@ def check_account_admin_group():
                 if is_admin:
                     user_display = user.display_name or user.user_name or "Unknown"
                     account_admin_users.append(user_display)
+            print(f"[check_account_admin_group] Found {len(account_admin_users)} admin users")
         except Exception as e:
-            pass
+            print(f"[check_account_admin_group] Error listing users: {e}")
         
         # Try to use AccountClient for more accurate account-level information
+        print("[check_account_admin_group] Checking account-level client...")
         try:
             account_client = _get_account_client()
             if account_client:
+                print("[check_account_admin_group] Account client available, listing account groups...")
                 # Get account-level groups
                 try:
                     account_groups = list(account_client.groups.list())
+                    print(f"[check_account_admin_group] Found {len(account_groups)} account-level groups")
                     for group in account_groups:
                         if hasattr(group, 'roles') and group.roles:
                             for role in group.roles:
                                 if hasattr(role, 'value') and 'account_admin' in role.value.lower():
                                     if group.display_name not in account_admin_groups:
                                         account_admin_groups.append(group.display_name)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[check_account_admin_group] Error listing account groups: {e}")
                 
                 # Get account-level users with admin role
+                print("[check_account_admin_group] Listing account-level users...")
                 try:
                     account_users = list(account_client.users.list())
+                    print(f"[check_account_admin_group] Found {len(account_users)} account-level users")
                     for user in account_users:
                         if hasattr(user, 'roles') and user.roles:
                             for role in user.roles:
@@ -760,14 +826,19 @@ def check_account_admin_group():
                                     user_display = user.display_name or user.user_name or "Unknown"
                                     if user_display not in account_admin_users:
                                         account_admin_users.append(user_display)
-                except:
-                    pass
-        except:
-            pass
+                except Exception as e:
+                    print(f"[check_account_admin_group] Error listing account users: {e}")
+            else:
+                print("[check_account_admin_group] No account client available")
+        except Exception as e:
+            print(f"[check_account_admin_group] Error getting account client: {e}")
+        
+        print(f"[check_account_admin_group] Final counts - Admin groups: {len(account_admin_groups)}, Admin users: {len(account_admin_users)}")
         
         # Evaluate results
         if account_admin_groups:
             if account_admin_users:
+                print("[check_account_admin_group] PASS - Admin assigned to groups (with some individual users)")
                 return {
                     "status": "pass",
                     "score": 2,
@@ -775,6 +846,7 @@ def check_account_admin_group():
                     "details": f"Account Admin assigned to groups: {', '.join(account_admin_groups)}. Note: {len(account_admin_users)} individual user(s) also have admin role."
                 }
             else:
+                print("[check_account_admin_group] PASS - Admin assigned to groups only")
                 return {
                     "status": "pass",
                     "score": 2,
@@ -782,6 +854,7 @@ def check_account_admin_group():
                     "details": f"Account Admin role properly assigned to group(s): {', '.join(account_admin_groups)}"
                 }
         elif account_admin_users:
+            print("[check_account_admin_group] FAIL - Admin assigned to individual users only")
             return {
                 "status": "fail",
                 "score": 0,
@@ -789,6 +862,7 @@ def check_account_admin_group():
                 "details": f"Account Admin assigned to {len(account_admin_users)} individual user(s) instead of groups. Create an admin group and assign the role to it."
             }
         else:
+            print("[check_account_admin_group] WARNING - Could not detect admin assignments")
             return {
                 "status": "warning",
                 "score": 1,
@@ -797,6 +871,7 @@ def check_account_admin_group():
             }
             
     except ImportError as e:
+        print(f"[check_account_admin_group] ImportError: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -804,6 +879,7 @@ def check_account_admin_group():
             "details": str(e)
         }
     except Exception as e:
+        print(f"[check_account_admin_group] Unexpected error: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -821,14 +897,21 @@ def check_metastore_admin_group():
     Returns:
         dict: Status with score, max_score, and details
     """
+    print("[check_metastore_admin_group] Starting check...")
+    
     try:
+        print("[check_metastore_admin_group] Getting workspace client...")
         w = _get_workspace_client()
+        print("[check_metastore_admin_group] Workspace client obtained successfully")
         
         # Get current metastore assignment for the workspace
         try:
+            print("[check_metastore_admin_group] Fetching metastore summary...")
             metastore_summary = w.metastores.summary()
+            print(f"[check_metastore_admin_group] Metastore summary: {metastore_summary}")
             
             if not metastore_summary or not metastore_summary.metastore_id:
+                print("[check_metastore_admin_group] No metastore connected")
                 return {
                     "status": "fail",
                     "score": 0,
@@ -837,11 +920,14 @@ def check_metastore_admin_group():
                 }
             
             # Get full metastore details to access owner
+            print(f"[check_metastore_admin_group] Getting metastore details for ID: {metastore_summary.metastore_id}")
             metastore = w.metastores.get(id=metastore_summary.metastore_id)
             metastore_owner = metastore.owner if metastore else None
             metastore_name = metastore.name if metastore else metastore_summary.metastore_id
+            print(f"[check_metastore_admin_group] Metastore name: {metastore_name}, owner: {metastore_owner}")
             
             if not metastore_owner:
+                print("[check_metastore_admin_group] Could not determine metastore owner")
                 return {
                     "status": "warning",
                     "score": 1,
@@ -856,48 +942,63 @@ def check_metastore_admin_group():
             owner_type = "unknown"
             
             # Method 1: Check if owner matches a group name
+            print("[check_metastore_admin_group] Listing groups to check if owner is a group...")
             try:
                 groups = list(w.groups.list())
+                print(f"[check_metastore_admin_group] Found {len(groups)} groups")
                 group_names = [g.display_name for g in groups if g.display_name]
                 if metastore_owner in group_names:
                     is_group = True
                     owner_type = "group"
-            except Exception:
-                pass
+                    print(f"[check_metastore_admin_group] Owner '{metastore_owner}' found in groups list")
+            except Exception as e:
+                print(f"[check_metastore_admin_group] Error listing groups: {e}")
             
             # Method 2: Check if owner looks like an email (individual user)
             if not is_group:
+                print(f"[check_metastore_admin_group] Owner not found in groups, checking if it's a user...")
                 if '@' in metastore_owner:
                     owner_type = "user"
+                    print(f"[check_metastore_admin_group] Owner contains '@', classified as user")
                 else:
                     # Could be a group name we couldn't verify, or service principal
                     # Check if it matches a user
+                    print(f"[check_metastore_admin_group] No '@' in owner, checking users list...")
                     try:
                         users = list(w.users.list(filter=f"userName eq '{metastore_owner}'"))
+                        print(f"[check_metastore_admin_group] User lookup returned {len(users)} results")
                         if users:
                             owner_type = "user"
                         else:
                             # Not found as user, might be a group we couldn't list
                             # or a service principal
+                            print(f"[check_metastore_admin_group] Not a user, checking service principals...")
                             try:
                                 sps = list(w.service_principals.list(filter=f"displayName eq '{metastore_owner}'"))
+                                print(f"[check_metastore_admin_group] Service principal lookup returned {len(sps)} results")
                                 if sps:
                                     owner_type = "service_principal"
                                 else:
                                     # Assume it's a group if not found as user or SP
                                     is_group = True
                                     owner_type = "group"
-                            except Exception:
+                                    print(f"[check_metastore_admin_group] Not found as user or SP, assuming group")
+                            except Exception as e:
                                 # If we can't check, assume it might be a group
+                                print(f"[check_metastore_admin_group] Error checking SPs: {e}, assuming group")
                                 is_group = True
                                 owner_type = "group"
-                    except Exception:
+                    except Exception as e:
                         # If user lookup fails and no @ sign, likely a group
+                        print(f"[check_metastore_admin_group] Error checking users: {e}, assuming group")
                         is_group = True
                         owner_type = "group"
             
+            print(f"[check_metastore_admin_group] Final determination: is_group={is_group}, owner_type={owner_type}")
+            
             # Evaluate results
             if is_group or owner_type == "group":
+                print("[check_metastore_admin_group] PASS - Owner is a group")
                 return {
                     "status": "pass",
                     "score": 2,
@@ -905,6 +1006,7 @@ def check_metastore_admin_group():
                     "details": f"Metastore Admin for '{metastore_name}' is assigned to group: {metastore_owner}"
                 }
             elif owner_type == "service_principal":
+                print("[check_metastore_admin_group] WARNING - Owner is a service principal")
                 return {
                     "status": "warning",
                     "score": 1,
@@ -912,6 +1014,7 @@ def check_metastore_admin_group():
                     "details": f"Metastore Admin for '{metastore_name}' is assigned to service principal: {metastore_owner}. Consider assigning to a group for better manageability."
                 }
             else:
+                print("[check_metastore_admin_group] FAIL - Owner is an individual user")
                 return {
                     "status": "fail",
                     "score": 0,
@@ -920,6 +1023,7 @@ def check_metastore_admin_group():
                 }
                 
         except Exception as e:
+            print(f"[check_metastore_admin_group] Exception during metastore check: {e}")
             error_msg = str(e).lower()
             if "not found" in error_msg or "no metastore" in error_msg:
                 return {
@@ -931,6 +1035,7 @@ def check_metastore_admin_group():
             raise
             
     except ImportError as e:
+        print(f"[check_metastore_admin_group] ImportError: {e}")
         return {
             "status": "error",
             "score": 0,
@@ -938,6 +1043,7 @@ def check_metastore_admin_group():
             "details": str(e)
         }
     except Exception as e:
+        print(f"[check_metastore_admin_group] Unexpected error: {e}")
         return {
             "status": "error",
             "score": 0,
