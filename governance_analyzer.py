@@ -2,11 +2,10 @@
 
 import json
 import os
-import requests
 
 def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance", dashboard_name="Governance Results Dashboard"):
     """
-    Create and deploy a Lakeview dashboard for governance results
+    Create and deploy a Lakeview dashboard for governance results using Databricks SDK
     
     Args:
         catalog_name: The catalog containing the governance_results table
@@ -17,14 +16,21 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
     Returns:
         dict: Dashboard creation response with dashboard_id and path
     """
-    # Get Databricks workspace context
+    try:
+        from databricks.sdk import WorkspaceClient
+        from databricks.sdk.service.dashboards import Dashboard
+    except ImportError:
+        return {
+            "status": "error",
+            "message": "Databricks SDK not available. Please install: pip install databricks-sdk"
+        }
+    
+    # Get workspace context
     try:
         from databricks.sdk.runtime import dbutils
         workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().get()
-        token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
     except:
-        # Fallback for local testing
-        raise Exception("This function must be run in a Databricks notebook environment")
+        workspace_url = None
     
     # Load dashboard template
     template_path = os.path.join(os.path.dirname(__file__), "dashboard_template.lvdash.json")
@@ -37,72 +43,57 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
         f"SELECT * FROM {full_table_name}"
     ]
     
-    # Prepare the API request
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    
-    # Ensure folder exists
-    if folder_path:
-        try:
-            mkdirs_url = f"{workspace_url}/api/2.0/workspace/mkdirs"
-            mkdirs_payload = {"path": folder_path}
-            mkdirs_response = requests.post(mkdirs_url, headers=headers, json=mkdirs_payload)
-            # Ignore errors if folder already exists
-        except Exception as e:
-            print(f"Note: Could not create folder {folder_path}: {str(e)}")
-    
-    # Create the dashboard (try with folder first, then without if it fails)
-    create_url = f"{workspace_url}/api/2.0/lakeview/dashboards"
-    create_payload = {
-        "display_name": dashboard_name,
-        "serialized_dashboard": json.dumps(dashboard_spec)
-    }
-    
-    # Add parent_path if folder_path is provided
-    if folder_path:
-        create_payload["parent_path"] = folder_path
-    
-    response = requests.post(create_url, headers=headers, json=create_payload)
-    
-    # If failed with folder path, try without it
-    if response.status_code != 200 and response.status_code != 201 and folder_path:
-        print(f"Note: Creating dashboard without folder path (status {response.status_code})")
-        create_payload.pop("parent_path", None)
-        response = requests.post(create_url, headers=headers, json=create_payload)
-    
-    if response.status_code in [200, 201]:
-        result = response.json()
-        dashboard_id = result.get("dashboard_id")
-        dashboard_path = result.get("path")
+    try:
+        # Initialize Databricks SDK WorkspaceClient
+        w = WorkspaceClient()
+        
+        # Ensure folder exists
+        if folder_path:
+            try:
+                w.workspace.mkdirs(path=folder_path)
+            except Exception as e:
+                print(f"Note: Folder may already exist: {str(e)}")
+        
+        # Create the dashboard using SDK
+        dashboard_obj = Dashboard(
+            display_name=dashboard_name,
+            parent_path=folder_path,
+            serialized_dashboard=json.dumps(dashboard_spec)
+        )
+        
+        # Create draft dashboard
+        created_dashboard = w.lakeview.create(
+            dashboard=dashboard_obj
+        )
+        
+        dashboard_id = created_dashboard.dashboard_id
+        dashboard_path = created_dashboard.path
         
         # Publish the dashboard
         try:
-            publish_url = f"{workspace_url}/api/2.0/lakeview/dashboards/{dashboard_id}/published"
-            publish_response = requests.post(publish_url, headers=headers, json={})
+            w.lakeview.publish(dashboard_id=dashboard_id)
         except Exception as e:
             print(f"Note: Could not publish dashboard: {str(e)}")
+        
+        # Build dashboard URL
+        if workspace_url:
+            dashboard_url = f"{workspace_url}/sql/dashboardsv3/{dashboard_id}"
+        else:
+            dashboard_url = f"<workspace_url>/sql/dashboardsv3/{dashboard_id}"
         
         return {
             "status": "success",
             "dashboard_id": dashboard_id,
             "dashboard_path": dashboard_path,
-            "workspace_url": f"{workspace_url}/sql/dashboardsv3/{dashboard_id}",
+            "workspace_url": dashboard_url,
             "message": f"Dashboard created successfully at {dashboard_path}"
         }
-    else:
-        error_detail = ""
-        try:
-            error_detail = response.json()
-        except:
-            error_detail = response.text
         
+    except Exception as e:
         return {
             "status": "error",
-            "error": error_detail,
-            "status_code": response.status_code,
-            "message": f"Failed to create dashboard: {response.status_code}. Error: {error_detail}"
+            "error": str(e),
+            "message": f"Failed to create dashboard: {str(e)}"
         }
 
 
