@@ -41,7 +41,7 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
     # Update the query to use the correct catalog and schema
     full_table_name = f"{catalog_name}.{schema_name}.governance_results"
     dashboard_spec["datasets"][0]["queryLines"] = [
-        f"SELECT * FROM {full_table_name}"
+        f"SELECT category, details, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score  FROM {full_table_name}"
     ]
     
     try:
