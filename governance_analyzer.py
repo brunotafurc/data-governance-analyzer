@@ -54,26 +54,76 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
             except Exception as e:
                 print(f"Note: Folder may already exist: {str(e)}")
         
-        # Create the dashboard using SDK
-        dashboard_obj = Dashboard(
-            display_name=dashboard_name,
-            parent_path=folder_path,
-            serialized_dashboard=json.dumps(dashboard_spec)
-        )
+        # Check if dashboard already exists
+        existing_dashboard_id = None
+        expected_path = f"{folder_path}/{dashboard_name}"
         
-        # Create draft dashboard
-        created_dashboard = w.lakeview.create(
-            dashboard=dashboard_obj
-        )
-        
-        dashboard_id = created_dashboard.dashboard_id
-        dashboard_path = created_dashboard.path
-        
-        # Publish the dashboard
         try:
-            w.lakeview.publish(dashboard_id=dashboard_id)
+            # List all dashboards and find if one with this name exists
+            dashboards = w.lakeview.list()
+            for db in dashboards:
+                if db.display_name == dashboard_name or db.path == expected_path:
+                    existing_dashboard_id = db.dashboard_id
+                    print(f"Found existing dashboard: {db.display_name} (ID: {db.dashboard_id})")
+                    break
         except Exception as e:
-            print(f"Note: Could not publish dashboard: {str(e)}")
+            print(f"Note: Could not list existing dashboards: {str(e)}")
+        
+        # If dashboard exists, update it; otherwise create new
+        if existing_dashboard_id:
+            # Update existing dashboard
+            try:
+                # Get current dashboard to preserve settings
+                current = w.lakeview.get(dashboard_id=existing_dashboard_id)
+                
+                # Update with new spec
+                updated_dashboard = w.lakeview.update(
+                    dashboard_id=existing_dashboard_id,
+                    serialized_dashboard=json.dumps(dashboard_spec)
+                )
+                
+                dashboard_id = existing_dashboard_id
+                dashboard_path = updated_dashboard.path or expected_path
+                
+                # Publish the updated dashboard
+                try:
+                    w.lakeview.publish(dashboard_id=dashboard_id)
+                except Exception as e:
+                    print(f"Note: Could not publish dashboard: {str(e)}")
+                
+                action = "updated"
+            except Exception as e:
+                # If update fails, try to trash and recreate
+                print(f"Update failed, attempting to replace: {str(e)}")
+                try:
+                    w.lakeview.trash(dashboard_id=existing_dashboard_id)
+                except:
+                    pass
+                existing_dashboard_id = None  # Force creation
+        
+        if not existing_dashboard_id:
+            # Create new dashboard
+            dashboard_obj = Dashboard(
+                display_name=dashboard_name,
+                parent_path=folder_path,
+                serialized_dashboard=json.dumps(dashboard_spec)
+            )
+            
+            # Create draft dashboard
+            created_dashboard = w.lakeview.create(
+                dashboard=dashboard_obj
+            )
+            
+            dashboard_id = created_dashboard.dashboard_id
+            dashboard_path = created_dashboard.path
+            
+            # Publish the dashboard
+            try:
+                w.lakeview.publish(dashboard_id=dashboard_id)
+            except Exception as e:
+                print(f"Note: Could not publish dashboard: {str(e)}")
+            
+            action = "created"
         
         # Build dashboard URL
         if workspace_url:
@@ -86,7 +136,7 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
             "dashboard_id": dashboard_id,
             "dashboard_path": dashboard_path,
             "workspace_url": dashboard_url,
-            "message": f"Dashboard created successfully at {dashboard_path}"
+            "message": f"Dashboard {action} successfully at {dashboard_path}"
         }
         
     except Exception as e:
