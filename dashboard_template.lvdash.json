@@ -4,7 +4,7 @@
       "name": "81cfba21",
       "displayName": "Governance Results",
       "queryLines": [
-        "SELECT * FROM {catalog}.{schema}.governance_results"
+        "SELECT category, details, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score  FROM {catalog}.{schema}.governance_results"
       ],
       "columns": [
         {
@@ -180,6 +180,10 @@
                     {
                       "name": "category",
                       "expression": "`category`"
+                    },
+                    {
+                      "name": "avg(score_percentage)",
+                      "expression": "AVG(`score_percentage`)"
                     }
                   ],
                   "disaggregated": false
@@ -198,7 +202,7 @@
                   }
                 },
                 "y": {
-                  "fieldName": "avg(score)",
+                  "fieldName": "avg(score_percentage)",
                   "format": {
                     "type": "number-plain",
                     "decimalPlaces": {
@@ -321,8 +325,12 @@
                       "expression": "`status`"
                     },
                     {
-                      "name": "score",
-                      "expression": "`score`"
+                      "name": "fraction_score",
+                      "expression": "`fraction_score`"
+                    },
+                    {
+                      "name": "score_percentage",
+                      "expression": "`score_percentage`"
                     },
                     {
                       "name": "timestamp",
@@ -340,10 +348,6 @@
                 "columns": [
                   {
                     "fieldName": "category",
-                    "title": "Category",
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
                     "booleanValues": [
                       "false",
                       "true"
@@ -356,14 +360,20 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "displayName": "Category"
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Category",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "task_name",
-                    "title": "Task Name",
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
                     "booleanValues": [
                       "false",
                       "true"
@@ -376,14 +386,20 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "displayName": "Task Name"
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Task Name",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "details",
-                    "title": "Details",
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
                     "booleanValues": [
                       "false",
                       "true"
@@ -396,35 +412,46 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "displayName": "Details"
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Details",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "status",
-                    "title": "Status",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "displayName": "Status"
+                    "order": 4,
+                    "title": "Status",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
                   },
                   {
-                    "fieldName": "score",
-                    "title": "Score",
-                    "type": "integer",
-                    "displayAs": "number",
-                    "visible": true,
-                    "numberFormat": "0",
+                    "fieldName": "fraction_score",
                     "booleanValues": [
                       "false",
                       "true"
@@ -437,15 +464,48 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "displayName": "Score"
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 6,
+                    "title": "fraction_score",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "score_percentage",
+                    "numberFormat": "0.00",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 7,
+                    "title": "score_percentage",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "timestamp",
-                    "title": "Timestamp",
-                    "type": "datetime",
-                    "displayAs": "datetime",
-                    "visible": true,
-                    "dateTimeFormat": "DD/MM/YYYY HH:mm:ss.SSS",
+                    "dateTimeFormat": "DD/MM/YYYY ",
                     "booleanValues": [
                       "false",
                       "true"
@@ -458,18 +518,83 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "displayName": "Timestamp"
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 8,
+                    "title": "Timestamp",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
                   }
                 ]
               },
+              "invisibleColumns": [
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "max_score",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 0,
+                  "title": "max_score",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "score",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 5,
+                  "title": "Score",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
               "frame": {
                 "title": "Detailed Results",
                 "showTitle": true
-              },
-              "itemsPerPage": 25,
-              "condensed": true,
-              "allowHTMLByDefault": false,
-              "invisibleColumns": []
+              }
             }
           },
           "position": {
