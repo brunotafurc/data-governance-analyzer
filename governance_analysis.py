@@ -5,6 +5,12 @@
 
 # COMMAND ----------
 
+# Install required dependencies
+%pip install databricks-sdk --upgrade --quiet
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 # Create widgets for parameters
 dbutils.widgets.text("catalog_name", "main", "Catalog Name")
 dbutils.widgets.text("schema_name", "default", "Schema Name")
@@ -15,12 +21,6 @@ schema_name = dbutils.widgets.get("schema_name")
 
 print(f"Using catalog: {catalog_name}")
 print(f"Using schema: {schema_name}")
-
-# COMMAND ----------
-
-# Install required dependencies
-%pip install databricks-sdk --quiet
-dbutils.library.restartPython()
 
 # COMMAND ----------
 
