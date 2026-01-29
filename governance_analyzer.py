@@ -111,18 +111,22 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
                         print(f"Listing failed: {str(list_error)}")
                 
                 if dashboard_id:
-                    # Update existing dashboard
-                    print(f"Updating dashboard {dashboard_id}...")
+                    # Trash the old dashboard and recreate
+                    print(f"Trashing old dashboard {dashboard_id}...")
                     try:
-                        updated_dashboard = w.lakeview.update(
-                            dashboard_id=dashboard_id,
-                            serialized_dashboard=json.dumps(dashboard_spec)
+                        w.lakeview.trash(dashboard_id=dashboard_id)
+                        print("Old dashboard trashed, creating new one...")
+                        
+                        # Now create the new dashboard
+                        created_dashboard = w.lakeview.create(
+                            dashboard=dashboard_obj
                         )
-                        dashboard_path = updated_dashboard.path
-                        action = "updated"
-                        print("Dashboard updated successfully")
-                    except Exception as update_error:
-                        raise Exception(f"Could not update existing dashboard: {str(update_error)}")
+                        dashboard_id = created_dashboard.dashboard_id
+                        dashboard_path = created_dashboard.path
+                        action = "replaced"
+                        print("Dashboard replaced successfully")
+                    except Exception as replace_error:
+                        raise Exception(f"Could not replace existing dashboard: {str(replace_error)}")
                 else:
                     raise Exception(f"Dashboard exists but could not find ID to update: {error_msg}")
             else:
