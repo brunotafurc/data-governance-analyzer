@@ -168,25 +168,782 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
         }
 
 
+def _get_workspace_client():
+    """Helper to get WorkspaceClient with error handling"""
+    try:
+        from databricks.sdk import WorkspaceClient
+        return WorkspaceClient()
+    except ImportError:
+        raise ImportError("Databricks SDK not available. Please install: pip install databricks-sdk")
+
+
+def _get_account_client():
+    """Helper to get AccountClient with error handling"""
+    try:
+        from databricks.sdk import AccountClient
+        import os
+        
+        # AccountClient requires account-level credentials
+        # Check if account host and credentials are available
+        account_host = os.environ.get("DATABRICKS_ACCOUNT_HOST") or os.environ.get("DATABRICKS_HOST")
+        account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
+        
+        if account_id:
+            return AccountClient()
+        return None
+    except ImportError:
+        raise ImportError("Databricks SDK not available. Please install: pip install databricks-sdk")
+    except Exception:
+        return None
+
+
 def check_metastore_connected():
-    """Check if UC Metastore is connected to workspace"""
-    return {"status": "pass", "score": 3, "max_score": 3, "details": "Metastore connected"}
+    """
+    Check if UC Metastore is connected to workspace.
+    
+    Uses the Databricks SDK to verify that a Unity Catalog metastore
+    is assigned to the current workspace.
+    
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    try:
+        w = _get_workspace_client()
+        
+        # Get current metastore assignment for the workspace
+        try:
+            metastore_summary = w.metastores.summary()
+            
+            if metastore_summary and metastore_summary.metastore_id:
+                metastore_name = metastore_summary.name or metastore_summary.metastore_id
+                return {
+                    "status": "pass",
+                    "score": 3,
+                    "max_score": 3,
+                    "details": f"Metastore '{metastore_name}' connected (ID: {metastore_summary.metastore_id})"
+                }
+            else:
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": 3,
+                    "details": "No metastore connected to workspace"
+                }
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "not found" in error_msg or "no metastore" in error_msg or "not assigned" in error_msg:
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": 3,
+                    "details": "No metastore assigned to this workspace"
+                }
+            raise
+            
+    except ImportError as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 3,
+            "details": str(e)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 3,
+            "details": f"Error checking metastore: {str(e)}"
+        }
+
+
+def _get_workspace_region(w):
+    """
+    Helper to detect workspace region across cloud providers (AWS, Azure, GCP).
+    
+    Args:
+        w: WorkspaceClient instance
+        
+    Returns:
+        str or None: The detected workspace region
+    """
+    import os
+    import re
+    
+    workspace_region = None
+    
+    # Method 1: Try to get region from Spark config (when running inside Databricks)
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.builder.getOrCreate()
+        # This tag contains the region in AWS/Azure Databricks
+        workspace_region = spark.conf.get("spark.databricks.clusterUsageTags.region", None)
+        if workspace_region:
+            return workspace_region
+    except:
+        pass
+    
+    # Method 2: Try dbutils context (when running in a notebook)
+    try:
+        from databricks.sdk.runtime import dbutils
+        ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+        # Try to get region from tags
+        tags = ctx.tags().get()
+        if tags and "region" in tags:
+            return tags["region"]
+    except:
+        pass
+    
+    # Method 3: Check environment variables
+    # AWS environment variables
+    workspace_region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    if workspace_region:
+        return workspace_region
+    
+    # Azure environment variable
+    workspace_region = os.environ.get("AZURE_REGION")
+    if workspace_region:
+        return workspace_region
+    
+    # Method 4: Parse from host URL
+    try:
+        host = w.config.host if hasattr(w, 'config') and hasattr(w.config, 'host') else ""
+        if not host:
+            host = os.environ.get("DATABRICKS_HOST", "")
+        
+        if host:
+            host_lower = host.lower().replace("https://", "").replace("http://", "")
+            
+            # Azure Databricks: adb-xxxx.xx.azuredatabricks.net or region.azuredatabricks.net
+            if "azuredatabricks" in host_lower:
+                parts = host_lower.split(".")
+                # Check each part for Azure region patterns
+                azure_regions = [
+                    "eastus", "eastus2", "westus", "westus2", "westus3",
+                    "centralus", "northcentralus", "southcentralus", "westcentralus",
+                    "canadacentral", "canadaeast",
+                    "brazilsouth", "brazilsoutheast",
+                    "northeurope", "westeurope", "uksouth", "ukwest",
+                    "francecentral", "francesouth", "switzerlandnorth", "switzerlandwest",
+                    "germanywestcentral", "germanynorth", "norwayeast", "norwaywest",
+                    "swedencentral", "swedensouth", "polandcentral",
+                    "eastasia", "southeastasia", "japaneast", "japanwest",
+                    "australiaeast", "australiasoutheast", "australiacentral",
+                    "centralindia", "southindia", "westindia", "jioindiawest",
+                    "koreacentral", "koreasouth",
+                    "southafricanorth", "southafricawest",
+                    "uaenorth", "uaecentral", "qatarcentral",
+                    "israelcentral", "italynorth"
+                ]
+                for part in parts:
+                    if part in azure_regions:
+                        return part
+                    # Also check partial matches
+                    for region in azure_regions:
+                        if region in part:
+                            return region
+            
+            # AWS Databricks: Uses workspace ID in URL, region from deployment
+            # Format: dbc-xxxxxxxx-xxxx.cloud.databricks.com
+            # We can try to get region from workspace API
+            elif "cloud.databricks.com" in host_lower:
+                # Try to get workspace details which may include region
+                try:
+                    # The deployment name sometimes contains region hints
+                    # e.g., oregon, virginia, ireland, singapore
+                    deployment_match = re.match(r'([a-z0-9-]+)\.cloud\.databricks\.com', host_lower)
+                    if deployment_match:
+                        deployment_name = deployment_match.group(1)
+                        # Map common deployment names to AWS regions
+                        aws_deployment_map = {
+                            "oregon": "us-west-2",
+                            "virginia": "us-east-1", 
+                            "ohio": "us-east-2",
+                            "norcal": "us-west-1",
+                            "ireland": "eu-west-1",
+                            "frankfurt": "eu-central-1",
+                            "london": "eu-west-2",
+                            "paris": "eu-west-3",
+                            "stockholm": "eu-north-1",
+                            "singapore": "ap-southeast-1",
+                            "sydney": "ap-southeast-2",
+                            "tokyo": "ap-northeast-1",
+                            "mumbai": "ap-south-1",
+                            "seoul": "ap-northeast-2",
+                            "saopaulo": "sa-east-1",
+                            "canada": "ca-central-1",
+                        }
+                        for name, region in aws_deployment_map.items():
+                            if name in deployment_name:
+                                return region
+                except:
+                    pass
+            
+            # GCP Databricks: accounts.gcp.databricks.com
+            elif "gcp.databricks.com" in host_lower:
+                # GCP region detection
+                gcp_regions = [
+                    "us-central1", "us-east1", "us-east4", "us-west1", "us-west2", "us-west3", "us-west4",
+                    "europe-west1", "europe-west2", "europe-west3", "europe-west4", "europe-west6",
+                    "europe-central2", "europe-north1",
+                    "asia-east1", "asia-east2", "asia-northeast1", "asia-northeast2", "asia-northeast3",
+                    "asia-south1", "asia-southeast1", "asia-southeast2",
+                    "australia-southeast1", "australia-southeast2",
+                    "southamerica-east1", "northamerica-northeast1", "northamerica-northeast2"
+                ]
+                for region in gcp_regions:
+                    if region in host_lower:
+                        return region
+    except:
+        pass
+    
+    return None
+
 
 def check_metastore_region():
-    """Check if workspace and metastore are in same region"""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Same region"}
+    """
+    Check if workspace and metastore are in the same region.
+    
+    Compares the workspace region with the metastore region to ensure
+    they are co-located for optimal performance and compliance.
+    Supports AWS, Azure, and GCP Databricks deployments.
+    
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    try:
+        w = _get_workspace_client()
+        
+        # Get metastore details including region
+        try:
+            metastore_summary = w.metastores.summary()
+            
+            if not metastore_summary or not metastore_summary.metastore_id:
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": 2,
+                    "details": "No metastore connected - cannot check region"
+                }
+            
+            # Get full metastore details to access region
+            metastore = w.metastores.get(id=metastore_summary.metastore_id)
+            metastore_region = metastore.region if metastore else None
+            
+            # Get workspace region using helper function
+            workspace_region = _get_workspace_region(w)
+            
+            if metastore_region:
+                # Normalize region names for comparison
+                metastore_region_normalized = metastore_region.lower().replace("_", "-")
+                
+                if workspace_region:
+                    workspace_region_normalized = workspace_region.lower().replace("_", "-")
+                    
+                    # Check for exact match or if one contains the other
+                    # (handles cases like "us-west-2" vs "uswest2")
+                    metastore_clean = metastore_region_normalized.replace("-", "")
+                    workspace_clean = workspace_region_normalized.replace("-", "")
+                    
+                    if (metastore_region_normalized == workspace_region_normalized or 
+                        metastore_clean == workspace_clean):
+                        return {
+                            "status": "pass",
+                            "score": 2,
+                            "max_score": 2,
+                            "details": f"Metastore and workspace both in region: {metastore_region}"
+                        }
+                    else:
+                        return {
+                            "status": "fail",
+                            "score": 0,
+                            "max_score": 2,
+                            "details": f"Region mismatch - Metastore: {metastore_region}, Workspace: {workspace_region}"
+                        }
+                else:
+                    # Cannot determine workspace region, report metastore region
+                    # This is still a pass since metastore is configured with a region
+                    return {
+                        "status": "pass",
+                        "score": 2,
+                        "max_score": 2,
+                        "details": f"Metastore region: {metastore_region} (workspace region could not be auto-detected, assumed same region)"
+                    }
+            else:
+                return {
+                    "status": "warning",
+                    "score": 1,
+                    "max_score": 2,
+                    "details": "Could not determine metastore region"
+                }
+                
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "not found" in error_msg or "no metastore" in error_msg:
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": 2,
+                    "details": "No metastore assigned - cannot check region"
+                }
+            raise
+            
+    except ImportError as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": str(e)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking metastore region: {str(e)}"
+        }
+
 
 def check_scim_aim_provisioning():
-    """Check if SCIM/AIM is used for identity provisioning"""
-    return {"status": "pass", "score": 3, "max_score": 3, "details": "SCIM enabled"}
+    """
+    Check if SCIM or AIM (Automatic Identity Management) is used for identity provisioning.
+    
+    Verifies that the workspace uses automated identity provisioning through:
+    - SCIM: System for Cross-domain Identity Management (syncs from external IdP like 
+      Azure AD, Okta, OneLogin to Databricks)
+    - AIM: Automatic Identity Management (Databricks feature that automatically syncs 
+      identities from the account level to workspaces)
+    
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    try:
+        w = _get_workspace_client()
+        
+        identity_indicators = {
+            "scim_groups": 0,           # Groups with external IDs (SCIM synced)
+            "scim_users": 0,            # Users with external IDs (SCIM synced)
+        }
+        
+        detected_methods = []
+        
+        # Check for groups with external IDs (SCIM indicator)
+        try:
+            groups = list(w.groups.list())
+            for group in groups:
+                # External ID indicates SCIM sync from IdP
+                if hasattr(group, 'external_id') and group.external_id:
+                    identity_indicators["scim_groups"] += 1
+        except Exception:
+            pass
+        
+        # Check for users with external IDs (SCIM indicator)
+        try:
+            users = list(w.users.list())
+            for user in users:
+                # External ID indicates SCIM provisioning from IdP
+                if hasattr(user, 'external_id') and user.external_id:
+                    identity_indicators["scim_users"] += 1
+        except Exception:
+            pass
+        
+        # Check AIM status via account settings API
+        aim_enabled = False
+        aim_status = "unknown"
+        
+        try:
+            account_client = _get_account_client()
+            if account_client:
+                try:
+                    # AIM setting is in account settings under "automatic_identity_management"
+                    # API: GET /api/2.0/accounts/{account_id}/settings
+                    # or via SDK: account_client.settings.get_automatic_identity_management()
+                    
+                    # Try the settings API
+                    if hasattr(account_client, 'settings'):
+                        # Check for automatic identity management setting
+                        try:
+                            aim_setting = account_client.settings.get_personal_compute_setting()
+                            # This is a placeholder - the actual API might differ
+                        except:
+                            pass
+                        
+                        # Try to read the AIM setting directly
+                        try:
+                            # The setting might be under different names depending on SDK version
+                            settings = account_client.settings
+                            if hasattr(settings, 'get_automatic_cluster_update_setting'):
+                                # SDK v0.20+ has different settings methods
+                                pass
+                        except:
+                            pass
+                    
+                    # Alternative: Use REST API directly to check AIM setting
+                    import os
+                    account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
+                    if account_id and hasattr(account_client, 'api_client'):
+                        try:
+                            response = account_client.api_client.do(
+                                'GET',
+                                f'/api/2.0/accounts/{account_id}/settings/types/automatic_identity_management/names/default'
+                            )
+                            if response and response.get('automatic_identity_management_setting'):
+                                aim_value = response['automatic_identity_management_setting'].get('value', {})
+                                aim_enabled = aim_value.get('enabled', False)
+                                aim_status = "enabled" if aim_enabled else "disabled"
+                        except:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        # Evaluate results
+        scim_total = identity_indicators["scim_groups"] + identity_indicators["scim_users"]
+        
+        # Determine which methods are detected
+        if scim_total > 0:
+            detected_methods.append(f"SCIM ({identity_indicators['scim_groups']} groups, {identity_indicators['scim_users']} users with external IDs)")
+        
+        if aim_enabled:
+            detected_methods.append("AIM (Automatic Identity Management enabled in account settings)")
+        
+        # Score based on detection
+        if aim_enabled or scim_total >= 5:
+            # AIM enabled or strong SCIM evidence
+            details = "Identity provisioning detected: " + "; ".join(detected_methods)
+            return {
+                "status": "pass",
+                "score": 3,
+                "max_score": 3,
+                "details": details
+            }
+        elif scim_total > 0:
+            # SCIM detected but not extensive
+            details = "Partial identity provisioning: " + "; ".join(detected_methods)
+            if aim_status == "unknown":
+                details += ". Could not verify AIM status (requires account-level credentials)."
+            elif aim_status == "disabled":
+                details += ". Consider enabling AIM in account console."
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 3,
+                "details": details
+            }
+        elif aim_status == "disabled":
+            # We could check AIM but it's disabled
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 3,
+                "details": "AIM is disabled and no SCIM integration detected. Enable AIM in Account Console > Settings > User provisioning, or configure SCIM from your Identity Provider."
+            }
+        else:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 3,
+                "details": "No SCIM or AIM integration detected. Enable SCIM provisioning from your Identity Provider (Azure AD, Okta, etc.) or enable Automatic Identity Management (AIM) in the account console."
+            }
+            
+    except ImportError as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 3,
+            "details": str(e)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 3,
+            "details": f"Error checking SCIM/AIM provisioning: {str(e)}"
+        }
+
 
 def check_account_admin_group():
-    """Check if Account Admin role is assigned to group"""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Assigned to group"}
+    """
+    Check if Account Admin role is assigned to a group rather than individual users.
+    
+    Best practice is to assign administrative roles to groups, not individuals,
+    to ensure proper access management and easier role transitions.
+    
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    try:
+        w = _get_workspace_client()
+        
+        account_admin_users = []
+        account_admin_groups = []
+        
+        # Check for groups with admin privileges
+        try:
+            groups = list(w.groups.list())
+            for group in groups:
+                if group.display_name:
+                    name_lower = group.display_name.lower()
+                    # Check for admin group naming patterns
+                    if any(pattern in name_lower for pattern in ['account_admin', 'account-admin', 'accountadmin', 'account admin']):
+                        account_admin_groups.append(group.display_name)
+                
+                # Check group entitlements/roles if available
+                if hasattr(group, 'entitlements') and group.entitlements:
+                    for entitlement in group.entitlements:
+                        if hasattr(entitlement, 'value') and entitlement.value:
+                            if 'account_admin' in entitlement.value.lower():
+                                if group.display_name not in account_admin_groups:
+                                    account_admin_groups.append(group.display_name)
+                                    
+                # Check roles if available
+                if hasattr(group, 'roles') and group.roles:
+                    for role in group.roles:
+                        if hasattr(role, 'value') and role.value:
+                            if 'account_admin' in role.value.lower():
+                                if group.display_name not in account_admin_groups:
+                                    account_admin_groups.append(group.display_name)
+        except Exception as e:
+            pass
+        
+        # Check for individual users with account admin
+        try:
+            users = list(w.users.list())
+            for user in users:
+                is_admin = False
+                
+                # Check entitlements
+                if hasattr(user, 'entitlements') and user.entitlements:
+                    for entitlement in user.entitlements:
+                        if hasattr(entitlement, 'value') and entitlement.value:
+                            if 'account_admin' in entitlement.value.lower():
+                                is_admin = True
+                                break
+                
+                # Check roles
+                if hasattr(user, 'roles') and user.roles:
+                    for role in user.roles:
+                        if hasattr(role, 'value') and role.value:
+                            if 'account_admin' in role.value.lower():
+                                is_admin = True
+                                break
+                
+                if is_admin:
+                    user_display = user.display_name or user.user_name or "Unknown"
+                    account_admin_users.append(user_display)
+        except Exception as e:
+            pass
+        
+        # Try to use AccountClient for more accurate account-level information
+        try:
+            account_client = _get_account_client()
+            if account_client:
+                # Get account-level groups
+                try:
+                    account_groups = list(account_client.groups.list())
+                    for group in account_groups:
+                        if hasattr(group, 'roles') and group.roles:
+                            for role in group.roles:
+                                if hasattr(role, 'value') and 'account_admin' in role.value.lower():
+                                    if group.display_name not in account_admin_groups:
+                                        account_admin_groups.append(group.display_name)
+                except:
+                    pass
+                
+                # Get account-level users with admin role
+                try:
+                    account_users = list(account_client.users.list())
+                    for user in account_users:
+                        if hasattr(user, 'roles') and user.roles:
+                            for role in user.roles:
+                                if hasattr(role, 'value') and 'account_admin' in role.value.lower():
+                                    user_display = user.display_name or user.user_name or "Unknown"
+                                    if user_display not in account_admin_users:
+                                        account_admin_users.append(user_display)
+                except:
+                    pass
+        except:
+            pass
+        
+        # Evaluate results
+        if account_admin_groups:
+            if account_admin_users:
+                return {
+                    "status": "pass",
+                    "score": 2,
+                    "max_score": 2,
+                    "details": f"Account Admin assigned to groups: {', '.join(account_admin_groups)}. Note: {len(account_admin_users)} individual user(s) also have admin role."
+                }
+            else:
+                return {
+                    "status": "pass",
+                    "score": 2,
+                    "max_score": 2,
+                    "details": f"Account Admin role properly assigned to group(s): {', '.join(account_admin_groups)}"
+                }
+        elif account_admin_users:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Account Admin assigned to {len(account_admin_users)} individual user(s) instead of groups. Create an admin group and assign the role to it."
+            }
+        else:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": "Could not detect Account Admin assignments. Verify at the account level that admin roles are assigned to groups."
+            }
+            
+    except ImportError as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": str(e)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking Account Admin group assignment: {str(e)}"
+        }
 
 def check_metastore_admin_group():
-    """Check if Metastore Admin role is assigned to group"""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Assigned to group"}
+    """
+    Check if Metastore Admin role is assigned to a group rather than individual users.
+    
+    Best practice is to assign the metastore admin (owner) role to a group, not an individual,
+    to ensure proper access management and easier role transitions.
+    
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    try:
+        w = _get_workspace_client()
+        
+        # Get current metastore assignment for the workspace
+        try:
+            metastore_summary = w.metastores.summary()
+            
+            if not metastore_summary or not metastore_summary.metastore_id:
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": 2,
+                    "details": "No metastore connected - cannot check metastore admin"
+                }
+            
+            # Get full metastore details to access owner
+            metastore = w.metastores.get(id=metastore_summary.metastore_id)
+            metastore_owner = metastore.owner if metastore else None
+            metastore_name = metastore.name if metastore else metastore_summary.metastore_id
+            
+            if not metastore_owner:
+                return {
+                    "status": "warning",
+                    "score": 1,
+                    "max_score": 2,
+                    "details": f"Could not determine metastore owner for '{metastore_name}'"
+                }
+            
+            # Check if owner is a group or an individual user
+            # Groups typically don't have @ in their name, users do (email format)
+            # Also check against known groups in the workspace
+            is_group = False
+            owner_type = "unknown"
+            
+            # Method 1: Check if owner matches a group name
+            try:
+                groups = list(w.groups.list())
+                group_names = [g.display_name for g in groups if g.display_name]
+                if metastore_owner in group_names:
+                    is_group = True
+                    owner_type = "group"
+            except Exception:
+                pass
+            
+            # Method 2: Check if owner looks like an email (individual user)
+            if not is_group:
+                if '@' in metastore_owner:
+                    owner_type = "user"
+                else:
+                    # Could be a group name we couldn't verify, or service principal
+                    # Check if it matches a user
+                    try:
+                        users = list(w.users.list(filter=f"userName eq '{metastore_owner}'"))
+                        if users:
+                            owner_type = "user"
+                        else:
+                            # Not found as user, might be a group we couldn't list
+                            # or a service principal
+                            try:
+                                sps = list(w.service_principals.list(filter=f"displayName eq '{metastore_owner}'"))
+                                if sps:
+                                    owner_type = "service_principal"
+                                else:
+                                    # Assume it's a group if not found as user or SP
+                                    is_group = True
+                                    owner_type = "group"
+                            except Exception:
+                                # If we can't check, assume it might be a group
+                                is_group = True
+                                owner_type = "group"
+                    except Exception:
+                        # If user lookup fails and no @ sign, likely a group
+                        is_group = True
+                        owner_type = "group"
+            
+            # Evaluate results
+            if is_group or owner_type == "group":
+                return {
+                    "status": "pass",
+                    "score": 2,
+                    "max_score": 2,
+                    "details": f"Metastore Admin for '{metastore_name}' is assigned to group: {metastore_owner}"
+                }
+            elif owner_type == "service_principal":
+                return {
+                    "status": "warning",
+                    "score": 1,
+                    "max_score": 2,
+                    "details": f"Metastore Admin for '{metastore_name}' is assigned to service principal: {metastore_owner}. Consider assigning to a group for better manageability."
+                }
+            else:
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": 2,
+                    "details": f"Metastore Admin for '{metastore_name}' is assigned to individual user: {metastore_owner}. Best practice is to assign to a group."
+                }
+                
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "not found" in error_msg or "no metastore" in error_msg:
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": 2,
+                    "details": "No metastore assigned - cannot check metastore admin"
+                }
+            raise
+            
+    except ImportError as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": str(e)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking Metastore Admin group assignment: {str(e)}"
+        }
 
 def check_workspace_admin_group():
     """Check if Workspace Admin role is assigned to group"""
