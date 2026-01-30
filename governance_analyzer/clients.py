@@ -29,6 +29,16 @@ def configure_account_auth(account_id=None, client_id=None, client_secret=None):
     _account_config["client_secret"] = client_secret
 
 
+def get_account_id():
+    """
+    Get the configured account ID.
+    
+    Returns:
+        str or None: The account ID from config or environment
+    """
+    return _account_config["account_id"] or os.environ.get("DATABRICKS_ACCOUNT_ID")
+
+
 def get_workspace_client():
     """
     Get WorkspaceClient with error handling.

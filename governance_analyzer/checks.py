@@ -1,8 +1,6 @@
 """Governance check functions for Unity Catalog."""
 
-import os
-
-from .clients import get_workspace_client, get_account_client, get_workspace_region
+from .clients import get_workspace_client, get_account_client, get_workspace_region, get_account_id
 
 
 # =============================================================================
@@ -237,7 +235,7 @@ def check_scim_aim_provisioning():
         scim_status = "unknown"
         
         # Check SCIM provisioning setting at account level
-        account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
+        account_id = get_account_id()
         
         if account_id and hasattr(account_client, 'api_client'):
             try:
@@ -373,7 +371,7 @@ def check_account_admin_group():
         
         account_admin_users = []
         account_admin_groups = []
-        account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
+        account_id = get_account_id()
         
         # Method 1: Use the role assignments API to directly get account admins
         # This is the most efficient approach - queries role assignments directly
@@ -524,6 +522,16 @@ def check_metastore_admin_group():
                     "details": f"Could not determine metastore owner for '{metastore_name}'"
                 }
             
+            # Handle special system owner
+            if metastore_owner.lower() == "system user":
+                print("[check_metastore_admin_group] Owner is 'System user' - system-managed metastore")
+                return {
+                    "status": "warning",
+                    "score": 1,
+                    "max_score": 2,
+                    "details": f"Metastore '{metastore_name}' is owned by 'System user'. Consider assigning ownership to a group for better governance."
+                }
+            
             # Determine owner type using SCIM filters (single API calls, no iteration)
             is_group = False
             owner_type = "unknown"
@@ -556,11 +564,9 @@ def check_metastore_admin_group():
                     except Exception as e:
                         print(f"[check_metastore_admin_group] Service principal lookup error: {e}")
                     
-                    # If still unknown and no @, it's likely a group we couldn't find
+                    # If still unknown, mark as unknown (don't assume group)
                     if owner_type == "unknown":
-                        is_group = True
-                        owner_type = "group"
-                        print(f"[check_metastore_admin_group] Owner not found as user/SP, assuming group")
+                        print(f"[check_metastore_admin_group] Could not determine owner type for '{metastore_owner}'")
             
             print(f"[check_metastore_admin_group] Final determination: is_group={is_group}, owner_type={owner_type}")
             
@@ -581,13 +587,21 @@ def check_metastore_admin_group():
                     "max_score": 2,
                     "details": f"Metastore Admin for '{metastore_name}' is assigned to service principal: {metastore_owner}. Consider assigning to a group for better manageability."
                 }
-            else:
+            elif owner_type == "user":
                 print("[check_metastore_admin_group] FAIL - Owner is an individual user")
                 return {
                     "status": "fail",
                     "score": 0,
                     "max_score": 2,
                     "details": f"Metastore Admin for '{metastore_name}' is assigned to individual user: {metastore_owner}. Best practice is to assign to a group."
+                }
+            else:
+                print("[check_metastore_admin_group] WARNING - Could not determine owner type")
+                return {
+                    "status": "warning",
+                    "score": 1,
+                    "max_score": 2,
+                    "details": f"Could not determine owner type for '{metastore_owner}' on metastore '{metastore_name}'. Verify ownership in Unity Catalog settings."
                 }
                 
         except Exception as e:
