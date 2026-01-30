@@ -572,10 +572,10 @@ def check_metastore_admin_group():
 
 def check_workspace_admin_group():
     """
-    Check if Workspace Admin role is assigned to a group rather than individual users.
+    Check if Workspace Admin role is assigned to a group.
     
-    Checks the workspace 'admins' group to see if it contains other groups
-    (indicating admin role is assigned via groups) or just individual users.
+    Verifies that the workspace has an 'admins' group, which is the standard
+    way to manage workspace admin access via groups in Databricks.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -587,47 +587,38 @@ def check_workspace_admin_group():
         w = get_workspace_client()
         print("[check_workspace_admin_group] Workspace client obtained")
         
-        admin_groups = []
+        admins_group_found = False
+        admins_group_members = 0
         
-        # Look for groups with workspace admin entitlements
-        print("[check_workspace_admin_group] Checking groups for workspace admin entitlements...")
+        # Look for the 'admins' group
+        print("[check_workspace_admin_group] Looking for 'admins' group...")
         try:
-            for group in w.groups.list(attributes="id,displayName,entitlements"):
-                entitlements = getattr(group, "entitlements", []) or []
-                # Check for workspace admin entitlements
-                is_admin = any(
-                    getattr(e, "value", "") in ["workspace-admin", "allow-cluster-create", "databricks-sql-access"]
-                    for e in entitlements
-                )
-                # Also check if it's the built-in admins group
-                if group.display_name and group.display_name.lower() == "admins":
-                    is_admin = True
-                
-                if is_admin:
-                    group_name = group.display_name or str(group.id)
-                    admin_groups.append(group_name)
-                    print(f"[check_workspace_admin_group] Found admin group: {group_name}")
+            for group in w.groups.list(filter='displayName eq "admins"'):
+                admins_group_found = True
+                # Get member count if available
+                members = getattr(group, "members", []) or []
+                admins_group_members = len(members)
+                print(f"[check_workspace_admin_group] Found 'admins' group with {admins_group_members} members")
+                break
         except Exception as e:
-            print(f"[check_workspace_admin_group] Error checking groups: {e}")
-        
-        print(f"[check_workspace_admin_group] Found {len(admin_groups)} admin group(s)")
+            print(f"[check_workspace_admin_group] Error checking for admins group: {e}")
         
         # Evaluate results
-        if admin_groups:
-            print("[check_workspace_admin_group] PASS - Admin groups exist")
+        if admins_group_found:
+            print("[check_workspace_admin_group] PASS - admins group exists")
             return {
                 "status": "pass",
                 "score": 2,
                 "max_score": 2,
-                "details": f"Workspace Admin role assigned to group(s): {', '.join(admin_groups)}"
+                "details": f"Workspace has 'admins' group for managing admin access"
             }
         else:
-            print("[check_workspace_admin_group] FAIL - No admin groups found")
+            print("[check_workspace_admin_group] FAIL - No admins group found")
             return {
                 "status": "fail",
                 "score": 0,
                 "max_score": 2,
-                "details": "No groups with Workspace Admin role found. Assign admin privileges to groups rather than individual users."
+                "details": "No 'admins' group found. Create an admins group to manage workspace admin access."
             }
             
     except Exception as e:
@@ -636,7 +627,7 @@ def check_workspace_admin_group():
             "status": "error",
             "score": 0,
             "max_score": 2,
-            "details": f"Error checking Workspace Admin group assignment: {str(e)}"
+            "details": f"Error checking Workspace Admin group: {str(e)}"
         }
 
 
