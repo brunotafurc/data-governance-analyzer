@@ -346,7 +346,7 @@ def check_account_admin_group():
     """
     Check if Account Admin role is assigned to a group rather than individual users.
     
-    Uses the SCIM v2 API directly to query for principals with account_admin role.
+    Iterates through account groups to find those with the account_admin role.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -367,86 +367,39 @@ def check_account_admin_group():
             }
         
         print("[check_account_admin_group] Account client obtained")
-        account_id = get_account_id()
         
-        account_admin_users = []
         account_admin_groups = []
         
-        # Query groups with account_admin role via SCIM v2 API
-        print("[check_account_admin_group] Querying SCIM API for admin groups...")
+        # Iterate through groups to find those with account_admin role
+        print("[check_account_admin_group] Iterating through groups...")
         try:
-            response = account_client.api_client.do(
-                "GET",
-                f"/api/2.1/accounts/{account_id}/scim/v2/Groups",
-                query={
-                    "filter": 'roles[value eq "account_admin"]',
-                    "attributes": "id,displayName,roles",
-                    "count": 100
-                }
-            )
-            if response and "Resources" in response:
-                for group in response["Resources"]:
-                    group_name = group.get("displayName") or group.get("id")
+            for group in account_client.groups.list(attributes="id,displayName,roles"):
+                roles = getattr(group, "roles", []) or []
+                if any(getattr(r, "value", "") == "account_admin" for r in roles):
+                    group_name = group.display_name or str(group.id)
                     account_admin_groups.append(group_name)
                     print(f"[check_account_admin_group] Found admin group: {group_name}")
         except Exception as e:
-            print(f"[check_account_admin_group] Error querying admin groups: {e}")
+            print(f"[check_account_admin_group] Error iterating groups: {e}")
         
-        # Query users with account_admin role via SCIM v2 API
-        print("[check_account_admin_group] Querying SCIM API for admin users...")
-        try:
-            response = account_client.api_client.do(
-                "GET",
-                f"/api/2.1/accounts/{account_id}/scim/v2/Users",
-                query={
-                    "filter": 'roles[value eq "account_admin"]',
-                    "attributes": "id,userName,displayName,roles",
-                    "count": 100
-                }
-            )
-            if response and "Resources" in response:
-                for user in response["Resources"]:
-                    user_name = user.get("userName") or user.get("displayName") or user.get("id")
-                    account_admin_users.append(user_name)
-                    print(f"[check_account_admin_group] Found admin user: {user_name}")
-        except Exception as e:
-            print(f"[check_account_admin_group] Error querying admin users: {e}")
+        print(f"[check_account_admin_group] Found {len(account_admin_groups)} admin group(s)")
         
-        print(f"[check_account_admin_group] Final counts - Admin groups: {len(account_admin_groups)}, Admin users: {len(account_admin_users)}")
-        
-        # Evaluate results
+        # Evaluate results - we only check if admin is assigned to groups
         if account_admin_groups:
-            if account_admin_users:
-                print("[check_account_admin_group] PASS - Admin assigned to groups (with some individual users)")
-                return {
-                    "status": "pass",
-                    "score": 2,
-                    "max_score": 2,
-                    "details": f"Account Admin assigned to groups: {', '.join(account_admin_groups)}. Note: {len(account_admin_users)} individual user(s) also have admin role."
-                }
-            else:
-                print("[check_account_admin_group] PASS - Admin assigned to groups only")
-                return {
-                    "status": "pass",
-                    "score": 2,
-                    "max_score": 2,
-                    "details": f"Account Admin role properly assigned to group(s): {', '.join(account_admin_groups)}"
-                }
-        elif account_admin_users:
-            print("[check_account_admin_group] FAIL - Admin assigned to individual users only")
+            print("[check_account_admin_group] PASS - Admin assigned to groups")
+            return {
+                "status": "pass",
+                "score": 2,
+                "max_score": 2,
+                "details": f"Account Admin role assigned to group(s): {', '.join(account_admin_groups)}"
+            }
+        else:
+            print("[check_account_admin_group] FAIL - No admin groups found")
             return {
                 "status": "fail",
                 "score": 0,
                 "max_score": 2,
-                "details": f"Account Admin assigned to {len(account_admin_users)} individual user(s) instead of groups: {', '.join(account_admin_users[:5])}{'...' if len(account_admin_users) > 5 else ''}. Create an admin group and assign the role to it."
-            }
-        else:
-            print("[check_account_admin_group] WARNING - Could not detect admin assignments")
-            return {
-                "status": "warning",
-                "score": 1,
-                "max_score": 2,
-                "details": "Could not detect Account Admin assignments. Verify at the account level that admin roles are assigned to groups."
+                "details": "No groups with Account Admin role found. Create an admin group and assign the account_admin role to it."
             }
             
     except Exception as e:
@@ -505,14 +458,14 @@ def check_metastore_admin_group():
                     "details": f"Could not determine metastore owner for '{metastore_name}'"
                 }
             
-            # Handle special system owner
+            # Handle special system owner - this is fine
             if metastore_owner.lower() == "system user":
-                print("[check_metastore_admin_group] Owner is 'System user' - system-managed metastore")
+                print("[check_metastore_admin_group] Owner is 'System user' - system-managed metastore (OK)")
                 return {
-                    "status": "warning",
-                    "score": 1,
+                    "status": "pass",
+                    "score": 2,
                     "max_score": 2,
-                    "details": f"Metastore '{metastore_name}' is owned by 'System user'. Consider assigning ownership to a group for better governance."
+                    "details": f"Metastore '{metastore_name}' is managed by 'System user' (Databricks-managed)"
                 }
             
             # Determine owner type using SCIM filters (single API calls, no iteration)
