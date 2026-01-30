@@ -1,201 +1,13 @@
-"""Data Governance Analyzer for Databricks Unity Catalog"""
+"""Governance check functions for Unity Catalog."""
 
-import json
 import os
 
-def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance", dashboard_name="Governance Results Dashboard"):
-    """
-    Create and deploy a Lakeview dashboard for governance results using Databricks SDK
-    
-    Args:
-        catalog_name: The catalog containing the governance_results table
-        schema_name: The schema containing the governance_results table
-        folder_path: The workspace folder path where the dashboard will be created
-        dashboard_name: The name for the dashboard
-    
-    Returns:
-        dict: Dashboard creation response with dashboard_id and path
-    """
-    try:
-        from databricks.sdk import WorkspaceClient
-        from databricks.sdk.service.dashboards import Dashboard
-    except ImportError:
-        return {
-            "status": "error",
-            "message": "Databricks SDK not available. Please install: pip install databricks-sdk"
-        }
-    
-    # Get workspace context
-    try:
-        from databricks.sdk.runtime import dbutils
-        workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().get()
-    except:
-        workspace_url = None
-    
-    print("Loading dashboard template...")
-    # Load dashboard template
-    template_path = os.path.join(os.path.dirname(__file__), "dashboard_template.lvdash.json")
-    with open(template_path, 'r') as f:
-        dashboard_spec = json.load(f)
-    
-    # Update the query to use the correct catalog and schema
-    full_table_name = f"{catalog_name}.{schema_name}.governance_results"
-    dashboard_spec["datasets"][0]["queryLines"] = [
-        f"SELECT category, details, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score  FROM {full_table_name}"
-    ]
-    
-    try:
-        print("Initializing Databricks SDK...")
-        # Initialize Databricks SDK WorkspaceClient
-        w = WorkspaceClient()
-        
-        # Ensure folder exists
-        print(f"Ensuring folder exists: {folder_path}")
-        if folder_path:
-            try:
-                w.workspace.mkdirs(path=folder_path)
-            except Exception as e:
-                print(f"Note: Folder may already exist: {str(e)}")
-        
-        # Try to create the dashboard directly - if it fails due to existing, we'll handle it
-        print("Preparing dashboard object...")
-        dashboard_obj = Dashboard(
-            display_name=dashboard_name,
-            parent_path=folder_path,
-            serialized_dashboard=json.dumps(dashboard_spec)
-        )
-        
-        action = "created"
-        dashboard_id = None
-        dashboard_path = None
-        
-        try:
-            # Try to create new dashboard
-            print("Calling lakeview.create()...")
-            created_dashboard = w.lakeview.create(
-                dashboard=dashboard_obj
-            )
-            print("Dashboard created successfully")
-            
-            dashboard_id = created_dashboard.dashboard_id
-            dashboard_path = created_dashboard.path
-            
-        except Exception as create_error:
-            # If creation fails due to existing dashboard, try to delete the workspace node
-            error_msg = str(create_error)
-            print(f"Create failed: {error_msg}")
-            if "already exists" in error_msg.lower():
-                print(f"Dashboard file exists in workspace, attempting to delete it...")
-                
-                # Try to delete the workspace file directly
-                dashboard_file_path = f"{folder_path}/{dashboard_name}.lvdash.json"
-                try:
-                    print(f"Deleting workspace file: {dashboard_file_path}")
-                    w.workspace.delete(path=dashboard_file_path)
-                    print("Workspace file deleted successfully")
-                    
-                    # Now try to create the dashboard again
-                    print("Retrying dashboard creation...")
-                    created_dashboard = w.lakeview.create(
-                        dashboard=dashboard_obj
-                    )
-                    dashboard_id = created_dashboard.dashboard_id
-                    dashboard_path = created_dashboard.path
-                    action = "replaced"
-                    print("Dashboard created successfully after removing old file")
-                    
-                except Exception as delete_error:
-                    print(f"Could not delete workspace file: {str(delete_error)}")
-                    
-                    # Fallback: try to find dashboard by listing
-                    print("Listing dashboards to find existing one...")
-                    try:
-                        count = 0
-                        found_dashboard = None
-                        for db in w.lakeview.list():
-                            count += 1
-                            if db.display_name == dashboard_name:
-                                found_dashboard = db
-                                print(f"Found existing dashboard: {db.display_name} (ID: {db.dashboard_id})")
-                                break
-                            if count >= 50:  # Limit search to avoid timeout
-                                print(f"Searched {count} dashboards, stopping...")
-                                break
-                        
-                        if found_dashboard:
-                            # Just return the existing dashboard info
-                            dashboard_id = found_dashboard.dashboard_id
-                            dashboard_path = found_dashboard.path
-                            action = "found existing"
-                            print(f"Using existing dashboard: {dashboard_id}")
-                        else:
-                            raise Exception(f"Dashboard exists but could not be found or deleted: {error_msg}")
-                            
-                    except Exception as list_error:
-                        raise Exception(f"Could not resolve dashboard conflict: {str(list_error)}")
-            else:
-                # Re-raise if not an "already exists" error
-                raise
-        
-        # Publish the dashboard
-        if dashboard_id:
-            print(f"Publishing dashboard {dashboard_id}...")
-            try:
-                w.lakeview.publish(dashboard_id=dashboard_id)
-                print("Dashboard published successfully")
-            except Exception as e:
-                print(f"Note: Could not publish dashboard: {str(e)}")
-        
-        # Build dashboard URL
-        if workspace_url:
-            dashboard_url = f"{workspace_url}/sql/dashboardsv3/{dashboard_id}"
-        else:
-            dashboard_url = f"<workspace_url>/sql/dashboardsv3/{dashboard_id}"
-        
-        return {
-            "status": "success",
-            "dashboard_id": dashboard_id,
-            "dashboard_path": dashboard_path or f"{folder_path}/{dashboard_name}",
-            "workspace_url": dashboard_url,
-            "message": f"Dashboard {action} successfully at {dashboard_path or folder_path}"
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": f"Failed to create dashboard: {str(e)}"
-        }
+from .clients import get_workspace_client, get_account_client, get_workspace_region
 
 
-def _get_workspace_client():
-    """Helper to get WorkspaceClient with error handling"""
-    try:
-        from databricks.sdk import WorkspaceClient
-        return WorkspaceClient()
-    except ImportError:
-        raise ImportError("Databricks SDK not available. Please install: pip install databricks-sdk")
-
-
-def _get_account_client():
-    """Helper to get AccountClient with error handling"""
-    try:
-        from databricks.sdk import AccountClient
-        import os
-        
-        # AccountClient requires account-level credentials
-        # Check if account host and credentials are available
-        account_host = os.environ.get("DATABRICKS_ACCOUNT_HOST") or os.environ.get("DATABRICKS_HOST")
-        account_id = os.environ.get("DATABRICKS_ACCOUNT_ID")
-        
-        if account_id:
-            return AccountClient()
-        return None
-    except ImportError:
-        raise ImportError("Databricks SDK not available. Please install: pip install databricks-sdk")
-    except Exception:
-        return None
-
+# =============================================================================
+# Metastore Checks
+# =============================================================================
 
 def check_metastore_connected():
     """
@@ -211,7 +23,7 @@ def check_metastore_connected():
     
     try:
         print("[check_metastore_connected] Getting workspace client...")
-        w = _get_workspace_client()
+        w = get_workspace_client()
         print("[check_metastore_connected] Workspace client obtained")
         
         # Get current metastore assignment for the workspace
@@ -267,149 +79,6 @@ def check_metastore_connected():
         }
 
 
-def _get_workspace_region(w):
-    """
-    Helper to detect workspace region across cloud providers (AWS, Azure, GCP).
-    
-    Args:
-        w: WorkspaceClient instance
-        
-    Returns:
-        str or None: The detected workspace region
-    """
-    import os
-    import re
-    
-    workspace_region = None
-    
-    # Method 1: Try to get region from Spark config (when running inside Databricks)
-    try:
-        from pyspark.sql import SparkSession
-        spark = SparkSession.builder.getOrCreate()
-        # This tag contains the region in AWS/Azure Databricks
-        workspace_region = spark.conf.get("spark.databricks.clusterUsageTags.region", None)
-        if workspace_region:
-            return workspace_region
-    except:
-        pass
-    
-    # Method 2: Try dbutils context (when running in a notebook)
-    try:
-        from databricks.sdk.runtime import dbutils
-        ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
-        # Try to get region from tags
-        tags = ctx.tags().get()
-        if tags and "region" in tags:
-            return tags["region"]
-    except:
-        pass
-    
-    # Method 3: Check environment variables
-    # AWS environment variables
-    workspace_region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
-    if workspace_region:
-        return workspace_region
-    
-    # Azure environment variable
-    workspace_region = os.environ.get("AZURE_REGION")
-    if workspace_region:
-        return workspace_region
-    
-    # Method 4: Parse from host URL
-    try:
-        host = w.config.host if hasattr(w, 'config') and hasattr(w.config, 'host') else ""
-        if not host:
-            host = os.environ.get("DATABRICKS_HOST", "")
-        
-        if host:
-            host_lower = host.lower().replace("https://", "").replace("http://", "")
-            
-            # Azure Databricks: adb-xxxx.xx.azuredatabricks.net or region.azuredatabricks.net
-            if "azuredatabricks" in host_lower:
-                parts = host_lower.split(".")
-                # Check each part for Azure region patterns
-                azure_regions = [
-                    "eastus", "eastus2", "westus", "westus2", "westus3",
-                    "centralus", "northcentralus", "southcentralus", "westcentralus",
-                    "canadacentral", "canadaeast",
-                    "brazilsouth", "brazilsoutheast",
-                    "northeurope", "westeurope", "uksouth", "ukwest",
-                    "francecentral", "francesouth", "switzerlandnorth", "switzerlandwest",
-                    "germanywestcentral", "germanynorth", "norwayeast", "norwaywest",
-                    "swedencentral", "swedensouth", "polandcentral",
-                    "eastasia", "southeastasia", "japaneast", "japanwest",
-                    "australiaeast", "australiasoutheast", "australiacentral",
-                    "centralindia", "southindia", "westindia", "jioindiawest",
-                    "koreacentral", "koreasouth",
-                    "southafricanorth", "southafricawest",
-                    "uaenorth", "uaecentral", "qatarcentral",
-                    "israelcentral", "italynorth"
-                ]
-                for part in parts:
-                    if part in azure_regions:
-                        return part
-                    # Also check partial matches
-                    for region in azure_regions:
-                        if region in part:
-                            return region
-            
-            # AWS Databricks: Uses workspace ID in URL, region from deployment
-            # Format: dbc-xxxxxxxx-xxxx.cloud.databricks.com
-            # We can try to get region from workspace API
-            elif "cloud.databricks.com" in host_lower:
-                # Try to get workspace details which may include region
-                try:
-                    # The deployment name sometimes contains region hints
-                    # e.g., oregon, virginia, ireland, singapore
-                    deployment_match = re.match(r'([a-z0-9-]+)\.cloud\.databricks\.com', host_lower)
-                    if deployment_match:
-                        deployment_name = deployment_match.group(1)
-                        # Map common deployment names to AWS regions
-                        aws_deployment_map = {
-                            "oregon": "us-west-2",
-                            "virginia": "us-east-1", 
-                            "ohio": "us-east-2",
-                            "norcal": "us-west-1",
-                            "ireland": "eu-west-1",
-                            "frankfurt": "eu-central-1",
-                            "london": "eu-west-2",
-                            "paris": "eu-west-3",
-                            "stockholm": "eu-north-1",
-                            "singapore": "ap-southeast-1",
-                            "sydney": "ap-southeast-2",
-                            "tokyo": "ap-northeast-1",
-                            "mumbai": "ap-south-1",
-                            "seoul": "ap-northeast-2",
-                            "saopaulo": "sa-east-1",
-                            "canada": "ca-central-1",
-                        }
-                        for name, region in aws_deployment_map.items():
-                            if name in deployment_name:
-                                return region
-                except:
-                    pass
-            
-            # GCP Databricks: accounts.gcp.databricks.com
-            elif "gcp.databricks.com" in host_lower:
-                # GCP region detection
-                gcp_regions = [
-                    "us-central1", "us-east1", "us-east4", "us-west1", "us-west2", "us-west3", "us-west4",
-                    "europe-west1", "europe-west2", "europe-west3", "europe-west4", "europe-west6",
-                    "europe-central2", "europe-north1",
-                    "asia-east1", "asia-east2", "asia-northeast1", "asia-northeast2", "asia-northeast3",
-                    "asia-south1", "asia-southeast1", "asia-southeast2",
-                    "australia-southeast1", "australia-southeast2",
-                    "southamerica-east1", "northamerica-northeast1", "northamerica-northeast2"
-                ]
-                for region in gcp_regions:
-                    if region in host_lower:
-                        return region
-    except:
-        pass
-    
-    return None
-
-
 def check_metastore_region():
     """
     Check if workspace and metastore are in the same region.
@@ -425,7 +94,7 @@ def check_metastore_region():
     
     try:
         print("[check_metastore_region] Getting workspace client...")
-        w = _get_workspace_client()
+        w = get_workspace_client()
         print("[check_metastore_region] Workspace client obtained")
         
         # Get metastore details including region
@@ -451,7 +120,7 @@ def check_metastore_region():
             
             # Get workspace region using helper function
             print("[check_metastore_region] Detecting workspace region...")
-            workspace_region = _get_workspace_region(w)
+            workspace_region = get_workspace_region(w)
             print(f"[check_metastore_region] Workspace region: {workspace_region}")
             
             if metastore_region:
@@ -532,6 +201,10 @@ def check_metastore_region():
         }
 
 
+# =============================================================================
+# Identity and Access Checks
+# =============================================================================
+
 def check_scim_aim_provisioning():
     """
     Check if SCIM provisioning is enabled at the account level.
@@ -546,10 +219,8 @@ def check_scim_aim_provisioning():
     print("[check_scim_aim_provisioning] Starting check...")
     
     try:
-        import os
-        
         print("[check_scim_aim_provisioning] Getting account client...")
-        account_client = _get_account_client()
+        account_client = get_account_client()
         
         if not account_client:
             print("[check_scim_aim_provisioning] No account client available")
@@ -686,10 +357,8 @@ def check_account_admin_group():
     print("[check_account_admin_group] Starting check...")
     
     try:
-        import os
-        
         print("[check_account_admin_group] Getting account client...")
-        account_client = _get_account_client()
+        account_client = get_account_client()
         
         if not account_client:
             print("[check_account_admin_group] No account client available")
@@ -808,6 +477,7 @@ def check_account_admin_group():
             "details": f"Error checking Account Admin group assignment: {str(e)}"
         }
 
+
 def check_metastore_admin_group():
     """
     Check if Metastore Admin role is assigned to a group rather than individual users.
@@ -822,7 +492,7 @@ def check_metastore_admin_group():
     
     try:
         print("[check_metastore_admin_group] Getting workspace client...")
-        w = _get_workspace_client()
+        w = get_workspace_client()
         print("[check_metastore_admin_group] Workspace client obtained successfully")
         
         # Get current metastore assignment for the workspace
@@ -949,82 +619,106 @@ def check_metastore_admin_group():
             "details": f"Error checking Metastore Admin group assignment: {str(e)}"
         }
 
+
 def check_workspace_admin_group():
-    """Check if Workspace Admin role is assigned to group"""
+    """Check if Workspace Admin role is assigned to group."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "Assigned to group"}
+
 
 def check_catalog_admin_group():
-    """Check if Catalog Admin role is assigned to group"""
+    """Check if Catalog Admin role is assigned to group."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "Assigned to group"}
 
+
 def check_at_least_one_account_admin():
-    """Check if at least 1 user is account admin"""
+    """Check if at least 1 user is account admin."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "3 account admins"}
 
+
 def check_account_admin_percentage():
-    """Check if less than 5% of users are Account Admin"""
+    """Check if less than 5% of users are Account Admin."""
     return {"status": "pass", "score": 1, "max_score": 1, "details": "2% are admins"}
 
+
+# =============================================================================
+# Asset, Storage, and Compute Checks
+# =============================================================================
+
 def check_multiple_catalogs():
-    """Check if multiple catalogs exist based on environment/BU/team"""
+    """Check if multiple catalogs exist based on environment/BU/team."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "5 catalogs created"}
 
+
 def check_catalog_binding():
-    """Check if no catalog is bound to all workspaces"""
+    """Check if no catalog is bound to all workspaces."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "Limited binding"}
 
+
 def check_managed_tables_percentage():
-    """Check if managed tables/volumes > 70%"""
+    """Check if managed tables/volumes > 70%."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "85% managed"}
 
+
 def check_no_external_storage():
-    """Check if no ADLS/S3 buckets used outside UC"""
+    """Check if no ADLS/S3 buckets used outside UC."""
     return {"status": "pass", "score": 3, "max_score": 3, "details": "All in UC"}
 
+
 def check_uc_compute():
-    """Check if compute is UC activated with right access mode"""
+    """Check if compute is UC activated with right access mode."""
     return {"status": "pass", "score": 3, "max_score": 3, "details": "UC enabled"}
 
+
 def check_no_hive_data():
-    """Check if no data is in hive metastore"""
+    """Check if no data is in hive metastore."""
     return {"status": "pass", "score": 3, "max_score": 3, "details": "All migrated"}
 
+
 def check_hive_disabled():
-    """Check if hive metastore is disabled"""
+    """Check if hive metastore is disabled."""
     return {"status": "pass", "score": 0, "max_score": 0, "details": "Disabled"}
 
+
 def check_system_tables():
-    """Check if all system tables are activated (70%)"""
+    """Check if all system tables are activated (70%)."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "100% activated"}
 
+
 def check_service_principals():
-    """Check if production jobs use service principals"""
+    """Check if production jobs use service principals."""
     return {"status": "pass", "score": 1, "max_score": 1, "details": "All jobs use SPs"}
 
+
 def check_production_access():
-    """Check if modify access to production is limited"""
+    """Check if modify access to production is limited."""
     return {"status": "pass", "score": 1, "max_score": 1, "details": "Limited access"}
 
+
 def check_group_ownership():
-    """Check if 70% of assets have groups as owners"""
+    """Check if 70% of assets have groups as owners."""
     return {"status": "pass", "score": 2, "max_score": 2, "details": "75% group owned"}
 
+
 def check_predictive_optimization():
-    """Check if 70% of managed tables have predictive optimization"""
+    """Check if 70% of managed tables have predictive optimization."""
     return {"status": "pass", "score": 1, "max_score": 1, "details": "80% enabled"}
 
+
 def check_no_dbfs_mounts():
-    """Check if 0 mount storage accounts to DBFS"""
+    """Check if 0 mount storage accounts to DBFS."""
     return {"status": "pass", "score": 3, "max_score": 3, "details": "No mounts"}
 
+
 def check_external_location_root():
-    """Check if no external volumes/tables at external location root"""
+    """Check if no external volumes/tables at external location root."""
     return {"status": "pass", "score": 3, "max_score": 3, "details": "All in subdirs"}
 
+
 def check_storage_credentials():
-    """Check if independent storage credentials for each external location"""
+    """Check if independent storage credentials for each external location."""
     return {"status": "pass", "score": 1, "max_score": 1, "details": "Separate credentials"}
 
+
 def check_data_quality():
-    """Check if data quality is activated on 50% of tables"""
+    """Check if data quality is activated on 50% of tables."""
     return {"status": "pass", "score": 1, "max_score": 1, "details": "60% monitored"}

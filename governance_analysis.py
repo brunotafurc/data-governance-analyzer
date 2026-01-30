@@ -14,13 +14,21 @@ dbutils.library.restartPython()
 # Create widgets for parameters
 dbutils.widgets.text("catalog_name", "main", "Catalog Name")
 dbutils.widgets.text("schema_name", "default", "Schema Name")
+dbutils.widgets.text("account_id", "", "Account ID (optional)")
+dbutils.widgets.text("client_id", "", "Client ID (optional)")
+dbutils.widgets.text("client_secret", "", "Client Secret (optional)")
 
 # Get parameter values
 catalog_name = dbutils.widgets.get("catalog_name")
 schema_name = dbutils.widgets.get("schema_name")
+account_id = dbutils.widgets.get("account_id") or None
+client_id = dbutils.widgets.get("client_id") or None
+client_secret = dbutils.widgets.get("client_secret") or None
 
 print(f"Using catalog: {catalog_name}")
 print(f"Using schema: {schema_name}")
+if account_id:
+    print(f"Account-level authentication: enabled")
 
 # COMMAND ----------
 
@@ -31,8 +39,14 @@ print(f"Using schema: {schema_name}")
 
 import governance_analyzer as ga
 from datetime import datetime
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
+
+# Configure account-level authentication if credentials provided
+if account_id:
+    ga.configure_account_auth(
+        account_id=account_id,
+        client_id=client_id,
+        client_secret=client_secret
+    )
 
 # COMMAND ----------
 
@@ -122,7 +136,6 @@ print("Creating Lakeview Dashboard...")
 print("Note: This may take up to 30 seconds...")
 
 import threading
-import time
 
 def create_dashboard_with_timeout():
     result = {"status": "timeout", "message": "Dashboard creation timed out after 30 seconds"}
