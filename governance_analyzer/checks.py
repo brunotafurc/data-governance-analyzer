@@ -346,7 +346,7 @@ def check_account_admin_group():
     """
     Check if Account Admin role is assigned to a group rather than individual users.
     
-    Uses SCIM filter to directly query principals with account_admin role.
+    Uses the SCIM v2 API directly to query for principals with account_admin role.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -367,27 +367,48 @@ def check_account_admin_group():
             }
         
         print("[check_account_admin_group] Account client obtained")
+        account_id = get_account_id()
         
         account_admin_users = []
         account_admin_groups = []
         
-        # Use SCIM filter to find groups with account_admin role
-        print("[check_account_admin_group] Querying groups with account_admin role...")
+        # Query groups with account_admin role via SCIM v2 API
+        print("[check_account_admin_group] Querying SCIM API for admin groups...")
         try:
-            for group in account_client.groups.list(filter='roles[value eq "account_admin"]'):
-                group_name = group.display_name or str(group.id)
-                account_admin_groups.append(group_name)
-                print(f"[check_account_admin_group] Found admin group: {group_name}")
+            response = account_client.api_client.do(
+                "GET",
+                f"/api/2.1/accounts/{account_id}/scim/v2/Groups",
+                query={
+                    "filter": 'roles[value eq "account_admin"]',
+                    "attributes": "id,displayName,roles",
+                    "count": 100
+                }
+            )
+            if response and "Resources" in response:
+                for group in response["Resources"]:
+                    group_name = group.get("displayName") or group.get("id")
+                    account_admin_groups.append(group_name)
+                    print(f"[check_account_admin_group] Found admin group: {group_name}")
         except Exception as e:
             print(f"[check_account_admin_group] Error querying admin groups: {e}")
         
-        # Use SCIM filter to find users with account_admin role
-        print("[check_account_admin_group] Querying users with account_admin role...")
+        # Query users with account_admin role via SCIM v2 API
+        print("[check_account_admin_group] Querying SCIM API for admin users...")
         try:
-            for user in account_client.users.list(filter='roles[value eq "account_admin"]'):
-                user_name = user.user_name or user.display_name
-                account_admin_users.append(user_name)
-                print(f"[check_account_admin_group] Found admin user: {user_name}")
+            response = account_client.api_client.do(
+                "GET",
+                f"/api/2.1/accounts/{account_id}/scim/v2/Users",
+                query={
+                    "filter": 'roles[value eq "account_admin"]',
+                    "attributes": "id,userName,displayName,roles",
+                    "count": 100
+                }
+            )
+            if response and "Resources" in response:
+                for user in response["Resources"]:
+                    user_name = user.get("userName") or user.get("displayName") or user.get("id")
+                    account_admin_users.append(user_name)
+                    print(f"[check_account_admin_group] Found admin user: {user_name}")
         except Exception as e:
             print(f"[check_account_admin_group] Error querying admin users: {e}")
         
