@@ -571,8 +571,73 @@ def check_metastore_admin_group():
 
 
 def check_workspace_admin_group():
-    """Check if Workspace Admin role is assigned to group."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Assigned to group"}
+    """
+    Check if Workspace Admin role is assigned to a group rather than individual users.
+    
+    Checks the workspace 'admins' group to see if it contains other groups
+    (indicating admin role is assigned via groups) or just individual users.
+    
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_workspace_admin_group] Starting check...")
+    
+    try:
+        print("[check_workspace_admin_group] Getting workspace client...")
+        w = get_workspace_client()
+        print("[check_workspace_admin_group] Workspace client obtained")
+        
+        admin_groups = []
+        
+        # Look for groups with workspace admin entitlements
+        print("[check_workspace_admin_group] Checking groups for workspace admin entitlements...")
+        try:
+            for group in w.groups.list(attributes="id,displayName,entitlements"):
+                entitlements = getattr(group, "entitlements", []) or []
+                # Check for workspace admin entitlements
+                is_admin = any(
+                    getattr(e, "value", "") in ["workspace-admin", "allow-cluster-create", "databricks-sql-access"]
+                    for e in entitlements
+                )
+                # Also check if it's the built-in admins group
+                if group.display_name and group.display_name.lower() == "admins":
+                    is_admin = True
+                
+                if is_admin:
+                    group_name = group.display_name or str(group.id)
+                    admin_groups.append(group_name)
+                    print(f"[check_workspace_admin_group] Found admin group: {group_name}")
+        except Exception as e:
+            print(f"[check_workspace_admin_group] Error checking groups: {e}")
+        
+        print(f"[check_workspace_admin_group] Found {len(admin_groups)} admin group(s)")
+        
+        # Evaluate results
+        if admin_groups:
+            print("[check_workspace_admin_group] PASS - Admin groups exist")
+            return {
+                "status": "pass",
+                "score": 2,
+                "max_score": 2,
+                "details": f"Workspace Admin role assigned to group(s): {', '.join(admin_groups)}"
+            }
+        else:
+            print("[check_workspace_admin_group] FAIL - No admin groups found")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 2,
+                "details": "No groups with Workspace Admin role found. Assign admin privileges to groups rather than individual users."
+            }
+            
+    except Exception as e:
+        print(f"[check_workspace_admin_group] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking Workspace Admin group assignment: {str(e)}"
+        }
 
 
 def check_catalog_admin_group():
