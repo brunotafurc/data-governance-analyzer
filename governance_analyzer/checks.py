@@ -591,6 +591,18 @@ def check_workspace_admin_group():
         admin_groups = []
         admin_users = []
         
+        # First, get all workspace groups to check membership against
+        print("[check_workspace_admin_group] Getting list of workspace groups...")
+        workspace_groups = set()
+        try:
+            for g in w.groups.list(attributes="displayName"):
+                if g.display_name:
+                    workspace_groups.add(g.display_name.lower())
+        except Exception as e:
+            print(f"[check_workspace_admin_group] Error getting workspace groups: {e}")
+        
+        print(f"[check_workspace_admin_group] Found {len(workspace_groups)} workspace groups")
+        
         # Get the 'admins' group and check its members
         print("[check_workspace_admin_group] Getting 'admins' group members...")
         try:
@@ -601,22 +613,17 @@ def check_workspace_admin_group():
                 print(f"[check_workspace_admin_group] Found {len(members)} members in admins group")
                 
                 for member in members:
-                    # Get member reference and display name
-                    member_ref = getattr(member, "$ref", None) or ""
-                    member_type = getattr(member, "type", None) or ""
                     display = getattr(member, "display", None) or getattr(member, "value", None) or "unknown"
                     
-                    print(f"[check_workspace_admin_group] Member: {display}, ref: {member_ref}, type: {member_type}")
-                    
-                    # Check if member is a group or user
-                    is_group = "Groups" in str(member_ref) or "Group" in str(member_type)
+                    # Check if this member name exists in the workspace groups
+                    is_group = display.lower() in workspace_groups
                     
                     if is_group:
                         admin_groups.append(display)
-                        print(f"[check_workspace_admin_group] -> Identified as group")
+                        print(f"[check_workspace_admin_group] Member '{display}' -> group")
                     else:
                         admin_users.append(display)
-                        print(f"[check_workspace_admin_group] -> Identified as user")
+                        print(f"[check_workspace_admin_group] Member '{display}' -> user")
                 break
         except Exception as e:
             print(f"[check_workspace_admin_group] Error checking admins group: {e}")
