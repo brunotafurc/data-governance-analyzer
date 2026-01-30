@@ -56,7 +56,7 @@ checks = [
     ("Metastore setup", "The workspace is in the same region as the metastore", ga.check_metastore_region),
     ("Identity", "Use SCIM or AIM from an Identity Provider", ga.check_scim_aim_provisioning),
     ("Identity", "Account Admin role is assigned to a group", ga.check_account_admin_group),
-    ("Identity", "Metastore Admin role is assigned to a group", ga.check_metastore_admin_group),
+    ("Identity", "Metastore Admin role is assigned to a group or to System User", ga.check_metastore_admin_group),
     ("Identity", "Workspace Admin role is assigned to a group", ga.check_workspace_admin_group),
     ("Identity", "Catalog Admin role is assigned to a group", ga.check_catalog_admin_group),
     ("Identity", "At least 1 user is an account admin", ga.check_at_least_one_account_admin),
