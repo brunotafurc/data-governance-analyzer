@@ -598,18 +598,25 @@ def check_workspace_admin_group():
                 # Get the full group details to see members
                 group_details = w.groups.get(id=group.id)
                 members = getattr(group_details, "members", []) or []
+                print(f"[check_workspace_admin_group] Found {len(members)} members in admins group")
                 
                 for member in members:
-                    member_type = getattr(member, "$ref", "") or getattr(member, "type", "")
-                    display = getattr(member, "display", "") or getattr(member, "value", "")
+                    # Get member reference and display name
+                    member_ref = getattr(member, "$ref", None) or ""
+                    member_type = getattr(member, "type", None) or ""
+                    display = getattr(member, "display", None) or getattr(member, "value", None) or "unknown"
+                    
+                    print(f"[check_workspace_admin_group] Member: {display}, ref: {member_ref}, type: {member_type}")
                     
                     # Check if member is a group or user
-                    if "Groups" in member_type or member_type == "Group":
+                    is_group = "Groups" in str(member_ref) or "Group" in str(member_type)
+                    
+                    if is_group:
                         admin_groups.append(display)
-                        print(f"[check_workspace_admin_group] Found admin group member: {display}")
+                        print(f"[check_workspace_admin_group] -> Identified as group")
                     else:
                         admin_users.append(display)
-                        print(f"[check_workspace_admin_group] Found admin user member: {display}")
+                        print(f"[check_workspace_admin_group] -> Identified as user")
                 break
         except Exception as e:
             print(f"[check_workspace_admin_group] Error checking admins group: {e}")
