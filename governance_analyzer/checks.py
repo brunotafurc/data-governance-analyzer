@@ -572,10 +572,11 @@ def check_metastore_admin_group():
 
 def check_workspace_admin_group():
     """
-    Check if Workspace Admin role is assigned to a group.
+    Check if an account-level group is assigned as workspace admin.
     
-    Verifies that the workspace has an 'admins' group, which is the standard
-    way to manage workspace admin access via groups in Databricks.
+    Verifies that the workspace 'admins' group contains at least one 
+    account-level group as a member (best practice), rather than only
+    individual users.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -587,38 +588,58 @@ def check_workspace_admin_group():
         w = get_workspace_client()
         print("[check_workspace_admin_group] Workspace client obtained")
         
-        admins_group_found = False
-        admins_group_members = 0
+        admin_groups = []
+        admin_users = []
         
-        # Look for the 'admins' group
-        print("[check_workspace_admin_group] Looking for 'admins' group...")
+        # Get the 'admins' group and check its members
+        print("[check_workspace_admin_group] Getting 'admins' group members...")
         try:
             for group in w.groups.list(filter='displayName eq "admins"'):
-                admins_group_found = True
-                # Get member count if available
-                members = getattr(group, "members", []) or []
-                admins_group_members = len(members)
-                print(f"[check_workspace_admin_group] Found 'admins' group with {admins_group_members} members")
+                # Get the full group details to see members
+                group_details = w.groups.get(id=group.id)
+                members = getattr(group_details, "members", []) or []
+                
+                for member in members:
+                    member_type = getattr(member, "$ref", "") or getattr(member, "type", "")
+                    display = getattr(member, "display", "") or getattr(member, "value", "")
+                    
+                    # Check if member is a group or user
+                    if "Groups" in member_type or member_type == "Group":
+                        admin_groups.append(display)
+                        print(f"[check_workspace_admin_group] Found admin group member: {display}")
+                    else:
+                        admin_users.append(display)
+                        print(f"[check_workspace_admin_group] Found admin user member: {display}")
                 break
         except Exception as e:
-            print(f"[check_workspace_admin_group] Error checking for admins group: {e}")
+            print(f"[check_workspace_admin_group] Error checking admins group: {e}")
+        
+        print(f"[check_workspace_admin_group] Admin groups: {len(admin_groups)}, Admin users: {len(admin_users)}")
         
         # Evaluate results
-        if admins_group_found:
-            print("[check_workspace_admin_group] PASS - admins group exists")
+        if admin_groups:
+            print("[check_workspace_admin_group] PASS - Account-level group(s) assigned as admin")
             return {
                 "status": "pass",
                 "score": 2,
                 "max_score": 2,
-                "details": f"Workspace has 'admins' group for managing admin access"
+                "details": f"Workspace admin assigned to account-level group(s): {', '.join(admin_groups)}"
             }
-        else:
-            print("[check_workspace_admin_group] FAIL - No admins group found")
+        elif admin_users:
+            print("[check_workspace_admin_group] FAIL - Only individual users are admins")
             return {
                 "status": "fail",
                 "score": 0,
                 "max_score": 2,
-                "details": "No 'admins' group found. Create an admins group to manage workspace admin access."
+                "details": f"Workspace admin assigned to {len(admin_users)} individual user(s) instead of groups. Assign an account-level group to the admins group."
+            }
+        else:
+            print("[check_workspace_admin_group] WARNING - Could not determine admin assignments")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": "Could not determine workspace admin assignments. Verify that an account-level group is assigned as admin."
             }
             
     except Exception as e:
