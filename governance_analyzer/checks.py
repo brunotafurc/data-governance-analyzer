@@ -346,8 +346,7 @@ def check_account_admin_group():
     """
     Check if Account Admin role is assigned to a group rather than individual users.
     
-    Uses the account-level role assignments API to directly query who has the 
-    account_admin role, which is more efficient than iterating through all groups/users.
+    Uses SCIM filter to directly query principals with account_admin role.
     
     Returns:
         dict: Status with score, max_score, and details
@@ -364,62 +363,33 @@ def check_account_admin_group():
                 "status": "error",
                 "score": 0,
                 "max_score": 2,
-                "details": "Cannot check Account Admin assignments: Account-level credentials not configured. Set DATABRICKS_ACCOUNT_HOST and DATABRICKS_ACCOUNT_ID environment variables."
+                "details": "Cannot check Account Admin assignments: Account-level credentials not configured."
             }
         
         print("[check_account_admin_group] Account client obtained")
         
         account_admin_users = []
         account_admin_groups = []
-        account_id = get_account_id()
         
-        # Method 1: Use the role assignments API to directly get account admins
-        # This is the most efficient approach - queries role assignments directly
-        print("[check_account_admin_group] Querying role assignments API...")
+        # Use SCIM filter to find groups with account_admin role
+        print("[check_account_admin_group] Querying groups with account_admin role...")
         try:
-            if hasattr(account_client, 'api_client'):
-                # Get all principals with account_admin role
-                response = account_client.api_client.do(
-                    'GET',
-                    f'/api/2.0/accounts/{account_id}/access-control/assignable-roles'
-                )
-                print(f"[check_account_admin_group] Assignable roles response: {response}")
-                
-                # Get role assignments for account_admin
-                try:
-                    role_assignments = account_client.api_client.do(
-                        'GET',
-                        f'/api/2.0/accounts/{account_id}/access-control/role-assignments'
-                    )
-                    print(f"[check_account_admin_group] Role assignments: {role_assignments}")
-                    
-                    if role_assignments and 'role_assignments' in role_assignments:
-                        for assignment in role_assignments['role_assignments']:
-                            role_name = assignment.get('role', '')
-                            principal = assignment.get('principal', {})
-                            
-                            if 'account_admin' in role_name.lower():
-                                # Determine if principal is a user or group
-                                if principal.get('group_name'):
-                                    group_name = principal['group_name']
-                                    if group_name not in account_admin_groups:
-                                        account_admin_groups.append(group_name)
-                                        print(f"[check_account_admin_group] Found admin group: {group_name}")
-                                elif principal.get('user_name'):
-                                    user_name = principal['user_name']
-                                    if user_name not in account_admin_users:
-                                        account_admin_users.append(user_name)
-                                        print(f"[check_account_admin_group] Found admin user: {user_name}")
-                                elif principal.get('service_principal_name'):
-                                    # Service principals count as non-group assignments
-                                    sp_name = principal['service_principal_name']
-                                    if sp_name not in account_admin_users:
-                                        account_admin_users.append(f"SP: {sp_name}")
-                                        print(f"[check_account_admin_group] Found admin service principal: {sp_name}")
-                except Exception as e:
-                    print(f"[check_account_admin_group] Role assignments API error: {e}")
+            for group in account_client.groups.list(filter='roles[value eq "account_admin"]'):
+                group_name = group.display_name or str(group.id)
+                account_admin_groups.append(group_name)
+                print(f"[check_account_admin_group] Found admin group: {group_name}")
         except Exception as e:
-            print(f"[check_account_admin_group] Access control API error: {e}")
+            print(f"[check_account_admin_group] Error querying admin groups: {e}")
+        
+        # Use SCIM filter to find users with account_admin role
+        print("[check_account_admin_group] Querying users with account_admin role...")
+        try:
+            for user in account_client.users.list(filter='roles[value eq "account_admin"]'):
+                user_name = user.user_name or user.display_name
+                account_admin_users.append(user_name)
+                print(f"[check_account_admin_group] Found admin user: {user_name}")
+        except Exception as e:
+            print(f"[check_account_admin_group] Error querying admin users: {e}")
         
         print(f"[check_account_admin_group] Final counts - Admin groups: {len(account_admin_groups)}, Admin users: {len(account_admin_users)}")
         
@@ -458,14 +428,6 @@ def check_account_admin_group():
                 "details": "Could not detect Account Admin assignments. Verify at the account level that admin roles are assigned to groups."
             }
             
-    except ImportError as e:
-        print(f"[check_account_admin_group] ImportError: {e}")
-        return {
-            "status": "error",
-            "score": 0,
-            "max_score": 2,
-            "details": str(e)
-        }
     except Exception as e:
         print(f"[check_account_admin_group] Unexpected error: {e}")
         return {
