@@ -837,8 +837,126 @@ def check_catalog_admin_group():
 
 
 def check_at_least_one_account_admin():
-    """Check if at least 1 user is account admin."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "3 account admins"}
+    """
+    Check if at least 1 user has the Account Admin role.
+
+    Lists account users (via account-level SCIM / users API), counts how many
+    have the account_admin role, and passes only when that count is >= 1.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_at_least_one_account_admin] Starting check...")
+
+    try:
+        print("[check_at_least_one_account_admin] Getting account client...")
+        account_client = get_account_client()
+
+        if not account_client:
+            print("[check_at_least_one_account_admin] No account client available")
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Cannot check account admins: Account-level credentials not configured (DATABRICKS_ACCOUNT_ID, etc.).",
+            }
+
+        print("[check_at_least_one_account_admin] Account client obtained")
+
+        account_admin_users = []
+        list_error = None
+
+        # filter to return only users with account_admin role (avoids fetching all users)
+        admin_filter = 'roles.value eq "account_admin"'
+
+        try:
+            # Prefer users_v2 if available (returns users with roles)
+            if hasattr(account_client, "users_v2"):
+                print("[check_at_least_one_account_admin] Listing account admins (users_v2 with filter)...")
+                for user in account_client.users_v2.list(
+                    attributes="id,userName,roles",
+                    filter=admin_filter,
+                ):
+                    name = getattr(user, "user_name", None) or getattr(user, "id", "unknown")
+                    account_admin_users.append(name)
+                    print(f"[check_at_least_one_account_admin] Account admin: {name}")
+            else:
+                # Fallback: Users via raw API with filter
+                account_id = get_account_id()
+                if not account_id:
+                    return {
+                        "status": "error",
+                        "score": 0,
+                        "max_score": 2,
+                        "details": "Account ID not configured; cannot list users.",
+                    }
+                print("[check_at_least_one_account_admin] Listing account admins (SCIM with filter)...")
+                start_index = 1
+                count = 2000
+                while True:
+                    response = account_client.api_client.do(
+                        "GET",
+                        f"/api/2.0/accounts/{account_id}/scim/v2/Users",
+                        query={
+                            "attributes": "userName,roles",
+                            "filter": admin_filter,
+                            "startIndex": start_index,
+                            "count": count,
+                        },
+                    )
+                    resources = response.get("Resources", [])
+                    if not resources:
+                        break
+                    for resource in resources:
+                        name = resource.get("userName") or resource.get("id", "unknown")
+                        account_admin_users.append(name)
+                        print(f"[check_at_least_one_account_admin] Account admin: {name}")
+                    if len(resources) < count:
+                        break
+                    start_index += count
+        except Exception as e:
+            print(f"[check_at_least_one_account_admin] Error listing users: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing account users: {str(list_error)}",
+            }
+
+        num_admins = len(account_admin_users)
+        print(f"[check_at_least_one_account_admin] Found {num_admins} account admin(s)")
+
+        if num_admins >= 1:
+            print("[check_at_least_one_account_admin] PASS - At least one account admin")
+            admins_detail = ", ".join(account_admin_users[:10])
+            if num_admins > 10:
+                admins_detail += f" and {num_admins - 10} more"
+            return {
+                "status": "pass",
+                "score": 2,
+                "max_score": 2,
+                "details": f"{num_admins} account admin(s): {admins_detail}",
+            }
+
+        print("[check_at_least_one_account_admin] FAIL - No account admin found")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": 2,
+            "details": "No user with Account Admin role found. Assign the account_admin role to at least one user or group in Account Settings → User management.",
+        }
+
+    except Exception as e:
+        print(f"[check_at_least_one_account_admin] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking account admins: {str(e)}",
+        }
 
 
 def check_account_admin_percentage():
