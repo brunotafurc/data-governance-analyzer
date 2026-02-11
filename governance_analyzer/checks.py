@@ -666,9 +666,147 @@ def check_workspace_admin_group():
         }
 
 
+def _catalog_owner_is_group(w, owner, catalog_name):
+    """
+    Determine if the given owner string is a group (or system).
+    Returns (is_ok_for_governance, owner_type) where is_ok = True for group or 'system user'.
+    """
+    if not owner:
+        return False, "unknown"
+    if owner.lower() == "system user":
+        return True, "system"
+    is_group = False
+    owner_type = "unknown"
+    try:
+        for _ in w.groups.list(filter=f'displayName eq "{owner}"'):
+            is_group = True
+            owner_type = "group"
+            break
+    except Exception:
+        pass
+    if not is_group:
+        if "@" in owner:
+            owner_type = "user"
+        else:
+            try:
+                for _ in w.service_principals.list(filter=f'displayName eq "{owner}"'):
+                    owner_type = "service_principal"
+                    break
+            except Exception:
+                pass
+    return (is_group or owner_type == "group"), owner_type
+
+
 def check_catalog_admin_group():
-    """Check if Catalog Admin role is assigned to group."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Assigned to group"}
+    """
+    Check if for every catalog the owner (admin) is a group of users.
+
+    Uses the catalogs list API to enumerate catalogs, then for each catalog
+    determines whether the owner is a group, a user, or a service principal.
+    Passes only when all catalogs have a group (or system) as owner.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_catalog_admin_group] Starting check...")
+
+    try:
+        account_client= get_account_client()
+        print("[check_catalog_admin_group] Workspace client obtained")
+
+        catalogs_with_group = []
+        catalogs_with_user = []
+        catalogs_with_sp = []
+        catalogs_unknown = []
+        list_error = None
+
+        try:
+            for catalog in w.catalogs.list():
+                name = getattr(catalog, "name", None) or "unknown"
+                owner = getattr(catalog, "owner", None)
+                if owner is None:
+                    try:
+                        full = account_client.catalogs.get(name=name)
+                        owner = getattr(full, "owner", None)
+                    except Exception as e:
+                        print(f"[check_catalog_admin_group] Could not get owner for catalog '{name}': {e}")
+                        catalogs_unknown.append(name)
+                        continue
+                if not owner:
+                    catalogs_unknown.append(name)
+                    continue
+                is_ok, owner_type = _catalog_owner_is_group(w, owner, name)
+                if is_ok:
+                    catalogs_with_group.append((name, owner))
+                elif owner_type == "user":
+                    catalogs_with_user.append((name, owner))
+                elif owner_type == "service_principal":
+                    catalogs_with_sp.append((name, owner))
+                else:
+                    catalogs_unknown.append(name)
+        except Exception as e:
+            print(f"[check_catalog_admin_group] Error listing catalogs: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing catalogs: {str(list_error)}",
+            }
+
+        total = len(catalogs_with_group) + len(catalogs_with_user) + len(catalogs_with_sp) + len(catalogs_unknown)
+        if total == 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": "No catalogs found. Create catalogs and assign group ownership for governance.",
+            }
+
+        if catalogs_with_user or catalogs_with_sp or catalogs_unknown:
+            parts = []
+            if catalogs_with_user:
+                parts.append(f"owned by user(s): {', '.join(n for n, _ in catalogs_with_user)}")
+            if catalogs_with_sp:
+                parts.append(f"owned by service principal(s): {', '.join(n for n, _ in catalogs_with_sp)}")
+            if catalogs_unknown:
+                parts.append(f"owner unknown: {', '.join(catalogs_unknown)}")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Not all catalogs have group ownership. {'; '.join(parts)}. Assign catalog ownership to groups."
+            }
+
+        print("[check_catalog_admin_group] PASS - All catalogs have group (or system) ownership")
+        group_list = ", ".join(f"'{n}' ({o})" for n, o in catalogs_with_group[:10])
+        if len(catalogs_with_group) > 10:
+            group_list += f" and {len(catalogs_with_group) - 10} more"
+        return {
+            "status": "pass",
+            "score": 2,
+            "max_score": 2,
+            "details": f"All {len(catalogs_with_group)} catalog(s) have group or system ownership: {group_list}",
+        }
+
+    except ImportError as e:
+        print(f"[check_catalog_admin_group] ImportError: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": str(e),
+        }
+    except Exception as e:
+        print(f"[check_catalog_admin_group] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking catalog admin group: {str(e)}",
+        }
 
 
 def check_at_least_one_account_admin():
