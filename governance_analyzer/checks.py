@@ -705,6 +705,8 @@ def check_catalog_admin_group():
     determines whether the owner is a group, a user, or a service principal.
     Passes only when all catalogs have a group (or system) as owner.
 
+    The check is executed at the workspace level, so it will check all catalogs in the workspace.
+
     Returns:
         dict: Status with score, max_score, and details
     """
@@ -781,12 +783,12 @@ def check_catalog_admin_group():
 
         total = len(catalogs_with_group) + len(catalogs_with_user) + len(catalogs_with_sp) + len(catalogs_unknown)
         if total == 0:
-            print("[check_catalog_admin_group] No catalogs found")
+            print("[check_catalog_admin_group] No catalogs found binded to this workspace")
             return {
                 "status": "warning",
                 "score": 1,
                 "max_score": 2,
-                "details": "No catalogs found. Create catalogs and assign group ownership for governance.",
+                "details": "No catalogs found binded to this workspace. Create catalogs and assign group ownership for governance.",
             }
 
         if catalogs_with_user or catalogs_with_sp or catalogs_unknown:
@@ -813,7 +815,7 @@ def check_catalog_admin_group():
             "status": "pass",
             "score": 2,
             "max_score": 2,
-            "details": f"All {len(catalogs_with_group)} catalog(s) have group or system ownership: {group_list}",
+            "details": f"All {len(catalogs_with_group)} catalog(s) have group or system ownership: {group_list} for this workspace",
         }
 
     except ImportError as e:
