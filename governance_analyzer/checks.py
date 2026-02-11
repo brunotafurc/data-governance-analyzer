@@ -721,7 +721,7 @@ def check_catalog_admin_group():
         list_error = None
 
         try:
-            for catalog in w.catalogs.list():
+            for catalog in account_client.catalogs.list():
                 name = getattr(catalog, "name", None) or "unknown"
                 owner = getattr(catalog, "owner", None)
                 if owner is None:
