@@ -711,7 +711,14 @@ def check_catalog_admin_group():
     print("[check_catalog_admin_group] Starting check...")
 
     try:
-        account_client= get_account_client()
+        w = get_workspace_client()
+        if w is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Workspace client not available. Configure Databricks workspace credentials (e.g. DATABRICKS_HOST, token or OAuth).",
+            }
         print("[check_catalog_admin_group] Workspace client obtained")
 
         catalogs_with_group = []
@@ -721,12 +728,12 @@ def check_catalog_admin_group():
         list_error = None
 
         try:
-            for catalog in account_client.catalogs.list():
+            for catalog in w.catalogs.list():
                 name = getattr(catalog, "name", None) or "unknown"
                 owner = getattr(catalog, "owner", None)
                 if owner is None:
                     try:
-                        full = account_client.catalogs.get(name=name)
+                        full = w.catalogs.get(name=name)
                         owner = getattr(full, "owner", None)
                     except Exception as e:
                         print(f"[check_catalog_admin_group] Could not get owner for catalog '{name}': {e}")
