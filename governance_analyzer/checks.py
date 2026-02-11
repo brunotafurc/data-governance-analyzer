@@ -955,8 +955,127 @@ def check_at_least_one_account_admin():
 
 
 def check_account_admin_percentage():
-    """Check if less than 5% of users are Account Admin."""
-    return {"status": "pass", "score": 1, "max_score": 1, "details": "2% are admins"}
+    """
+    Check if less than 5% of users are Account Admin.
+
+    Lists account users, counts how many have the account_admin role, and passes
+    only when (account_admins / total_users) * 100 < 5.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    ADMIN_PCT_THRESHOLD = 5.0
+    print("[check_account_admin_percentage] Starting check...")
+
+    try:
+        print("[check_account_admin_percentage] Getting account client...")
+        account_client = get_account_client()
+
+        if not account_client:
+            print("[check_account_admin_percentage] No account client available — check skipped")
+            return {
+                "status": "warning",
+                "score": 0,
+                "max_score": 1,
+                "details": (
+                    "Account-level credentials not configured; check skipped. "
+                    "Set DATABRICKS_ACCOUNT_ID (and optionally client_id/secret) to run this check."
+                ),
+            }
+
+        print("[check_account_admin_percentage] Account client obtained")
+
+        total_users = 0
+        account_admin_count = 0
+        list_error = None
+
+        try:
+            if hasattr(account_client, "users_v2"):
+                print("[check_account_admin_percentage] Listing account users (users_v2)...")
+                for user in account_client.users_v2.list(attributes="id,userName,roles"):
+                    total_users += 1
+                    roles = getattr(user, "roles", []) or []
+                    if any(getattr(r, "value", "") == "account_admin" for r in roles):
+                        account_admin_count += 1
+            else:
+                account_id = get_account_id()
+                if not account_id:
+                    return {
+                        "status": "error",
+                        "score": 0,
+                        "max_score": 1,
+                        "details": "Account ID not configured; cannot list users.",
+                    }
+                print("[check_account_admin_percentage] Listing account users (SCIM)...")
+                start_index = 1
+                count = 2000
+                while True:
+                    response = account_client.api_client.do(
+                        "GET",
+                        f"/api/2.0/accounts/{account_id}/scim/v2/Users",
+                        query={"attributes": "userName,roles", "startIndex": start_index, "count": count},
+                    )
+                    resources = response.get("Resources", [])
+                    if not resources:
+                        break
+                    for resource in resources:
+                        total_users += 1
+                        roles = resource.get("roles", [])
+                        role_values = [r.get("value", "") for r in roles if isinstance(r, dict)]
+                        if "account_admin" in role_values:
+                            account_admin_count += 1
+                    if len(resources) < count:
+                        break
+                    start_index += count
+        except Exception as e:
+            print(f"[check_account_admin_percentage] Error listing users: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 1,
+                "details": f"Error listing account users: {str(list_error)}",
+            }
+
+        if total_users == 0:
+            print("[check_account_admin_percentage] No users found")
+            return {
+                "status": "warning",
+                "score": 0,
+                "max_score": 1,
+                "details": "No account users found; cannot compute admin percentage.",
+            }
+
+        pct = round((account_admin_count / total_users) * 100.0, 2)
+        print(f"[check_account_admin_percentage] Total users: {total_users}, account admins: {account_admin_count}, percentage: {pct}%")
+
+        if pct < ADMIN_PCT_THRESHOLD:
+            print(f"[check_account_admin_percentage] PASS - {pct}% are account admins (below {ADMIN_PCT_THRESHOLD}%)")
+            return {
+                "status": "pass",
+                "score": 1,
+                "max_score": 1,
+                "details": f"{pct}% of users are Account Admin ({account_admin_count}/{total_users}), below {ADMIN_PCT_THRESHOLD}% threshold.",
+            }
+
+        print(f"[check_account_admin_percentage] FAIL - {pct}% are account admins (at or above {ADMIN_PCT_THRESHOLD}%)")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": 1,
+            "details": f"{pct}% of users are Account Admin ({account_admin_count}/{total_users}). Best practice: keep under {ADMIN_PCT_THRESHOLD}%.",
+        }
+
+    except Exception as e:
+        print(f"[check_account_admin_percentage] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 1,
+            "details": f"Error checking account admin percentage: {str(e)}",
+        }
 
 
 # =============================================================================
