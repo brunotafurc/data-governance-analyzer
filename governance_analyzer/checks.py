@@ -1092,9 +1092,126 @@ def check_catalog_binding():
     return {"status": "pass", "score": 2, "max_score": 2, "details": "Limited binding"}
 
 
+def _table_type_to_count(ttype):
+    """Map table_type to bucket: 'managed', 'external', or 'view'. Returns None if unknown."""
+    if ttype is None:
+        return None
+    ttype_str = str(ttype).upper() if ttype else ""
+    if ttype_str == "MANAGED":
+        return "managed"
+    if ttype_str == "EXTERNAL":
+        return "external"
+    if "VIEW" in ttype_str or ttype_str == "VIEW":
+        return "view"
+    return None
+
+
 def check_managed_tables_percentage():
-    """Check if managed tables/volumes > 70%."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "85% managed"}
+    """
+    Check if managed tables (and volumes) are more than 70% of all data tables/volumes.
+
+    Uses list_summaries(catalog_name, schema_name_pattern="%") to get all tables
+    per catalog in one call (two loops: catalogs -> table summaries). Counts
+    MANAGED vs EXTERNAL; views are excluded from the percentage. Passes when managed_pct > 70.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    MANAGED_PCT_THRESHOLD = 70.0
+    print("[check_managed_tables_percentage] Starting check...")
+
+    try:
+        print("[check_managed_tables_percentage] Getting workspace client...")
+        w = get_workspace_client()
+        if w is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Workspace client not available.",
+            }
+        print("[check_managed_tables_percentage] Workspace client obtained")
+
+        managed_count = 0
+        external_count = 0
+        view_count = 0
+        list_error = None
+
+        try:
+            for catalog in w.catalogs.list():
+                catalog_name = getattr(catalog, "name", None) or ""
+                if not catalog_name:
+                    continue
+                try:
+                    # One call per catalog: all table summaries across all schemas (no schema loop)
+                    for summary in w.tables.list_summaries(
+                        catalog_name=catalog_name,
+                        schema_name_pattern="%",
+                        max_results=0,
+                    ):
+                        ttype = getattr(summary, "table_type", None)
+                        bucket = _table_type_to_count(ttype)
+                        if bucket == "managed":
+                            managed_count += 1
+                        elif bucket == "external":
+                            external_count += 1
+                        elif bucket == "view":
+                            view_count += 1
+                except Exception as catalog_err:
+                    print(f"[check_managed_tables_percentage] Catalog {catalog_name}: {catalog_err}")
+        except Exception as e:
+            print(f"[check_managed_tables_percentage] Error listing tables: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing tables: {str(list_error)}",
+            }
+
+        data_tables = managed_count + external_count
+        if data_tables == 0:
+            print("[check_managed_tables_percentage] No data tables (managed+external) found")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": f"No managed or external tables found (views: {view_count}). Create tables to measure.",
+            }
+
+        managed_pct = round((managed_count / data_tables) * 100.0, 2)
+        print(
+            f"[check_managed_tables_percentage] Managed: {managed_count}, external: {external_count}, "
+            f"views: {view_count}, managed %: {managed_pct}%"
+        )
+
+        if managed_pct > MANAGED_PCT_THRESHOLD:
+            print(f"[check_managed_tables_percentage] PASS - {managed_pct}% managed (above {MANAGED_PCT_THRESHOLD}%)")
+            return {
+                "status": "pass",
+                "score": 2,
+                "max_score": 2,
+                "details": f"{managed_pct}% of data tables are managed ({managed_count}/{data_tables}), above {MANAGED_PCT_THRESHOLD}% threshold.",
+            }
+
+        print(f"[check_managed_tables_percentage] FAIL - {managed_pct}% managed (at or below {MANAGED_PCT_THRESHOLD}%)")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": 2,
+            "details": f"{managed_pct}% of data tables are managed ({managed_count}/{data_tables}). Best practice: use managed tables for > {MANAGED_PCT_THRESHOLD}%.",
+        }
+
+    except Exception as e:
+        print(f"[check_managed_tables_percentage] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking managed tables percentage: {str(e)}",
+        }
 
 
 def check_no_external_storage():
