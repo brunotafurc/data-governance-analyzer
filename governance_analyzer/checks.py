@@ -866,18 +866,35 @@ def check_at_least_one_account_admin():
         account_admin_users = []
         list_error = None
 
+        # SCIM filter: bracket notation for multi-valued attribute (RFC 7644)
+        admin_filter = 'roles[value eq "account_admin"]'
+
         try:
             # Prefer users_v2 if available (returns users with roles)
             if hasattr(account_client, "users_v2"):
-                print("[check_at_least_one_account_admin] Listing account users (users_v2)...")
-                for user in account_client.users_v2.list(attributes="id,userName,roles"):
-                    roles = getattr(user, "roles", []) or []
-                    if any(getattr(r, "value", "") == "account_admin" for r in roles):
+                print("[check_at_least_one_account_admin] Listing account admins (users_v2 with filter)...")
+                try:
+                    for user in account_client.users_v2.list(
+                        attributes="id,userName,roles",
+                        filter=admin_filter,
+                    ):
                         name = getattr(user, "user_name", None) or getattr(user, "id", "unknown")
                         account_admin_users.append(name)
                         print(f"[check_at_least_one_account_admin] Account admin: {name}")
+                except Exception as filter_err:
+                    err_msg = str(filter_err).lower()
+                    if "not supported" in err_msg or "unparsable" in err_msg or "schema" in err_msg:
+                        print(f"[check_at_least_one_account_admin] Filter not supported, listing all users: {filter_err}")
+                        for user in account_client.users_v2.list(attributes="id,userName,roles"):
+                            roles = getattr(user, "roles", []) or []
+                            if any(getattr(r, "value", "") == "account_admin" for r in roles):
+                                name = getattr(user, "user_name", None) or getattr(user, "id", "unknown")
+                                account_admin_users.append(name)
+                                print(f"[check_at_least_one_account_admin] Account admin: {name}")
+                    else:
+                        raise
             else:
-                # Fallback: SCIM Users (no server-side filter - roles.value filter not supported by API)
+                # Fallback: SCIM Users with filter (bracket notation per RFC 7644)
                 account_id = get_account_id()
                 if not account_id:
                     return {
@@ -886,32 +903,65 @@ def check_at_least_one_account_admin():
                         "max_score": 2,
                         "details": "Account ID not configured; cannot list users.",
                     }
-                print("[check_at_least_one_account_admin] Listing account users (SCIM)...")
-                start_index = 1
-                count = 2000
-                while True:
-                    response = account_client.api_client.do(
-                        "GET",
-                        f"/api/2.0/accounts/{account_id}/scim/v2/Users",
-                        query={
-                            "attributes": "userName,roles",
-                            "startIndex": start_index,
-                            "count": count,
-                        },
-                    )
-                    resources = response.get("Resources", [])
-                    if not resources:
-                        break
-                    for resource in resources:
-                        roles = resource.get("roles", [])
-                        role_values = [r.get("value", "") for r in roles if isinstance(r, dict)]
-                        if "account_admin" in role_values:
-                            name = resource.get("userName") or resource.get("id", "unknown")
-                            account_admin_users.append(name)
-                            print(f"[check_at_least_one_account_admin] Account admin: {name}")
-                    if len(resources) < count:
-                        break
-                    start_index += count
+                use_filter = True
+                try:
+                    print("[check_at_least_one_account_admin] Listing account admins (SCIM with filter)...")
+                    start_index = 1
+                    count = 2000
+                    while True:
+                        q = {"attributes": "userName,roles", "startIndex": start_index, "count": count}
+                        if use_filter:
+                            q["filter"] = admin_filter
+                        response = account_client.api_client.do(
+                            "GET",
+                            f"/api/2.0/accounts/{account_id}/scim/v2/Users",
+                            query=q,
+                        )
+                        resources = response.get("Resources", [])
+                        if not resources:
+                            break
+                        for resource in resources:
+                            if use_filter:
+                                name = resource.get("userName") or resource.get("id", "unknown")
+                                account_admin_users.append(name)
+                                print(f"[check_at_least_one_account_admin] Account admin: {name}")
+                            else:
+                                roles = resource.get("roles", [])
+                                role_values = [r.get("value", "") for r in roles if isinstance(r, dict)]
+                                if "account_admin" in role_values:
+                                    name = resource.get("userName") or resource.get("id", "unknown")
+                                    account_admin_users.append(name)
+                                    print(f"[check_at_least_one_account_admin] Account admin: {name}")
+                        if len(resources) < count:
+                            break
+                        start_index += count
+                except Exception as scim_err:
+                    err_msg = str(scim_err).lower()
+                    if use_filter and ("not supported" in err_msg or "unparsable" in err_msg or "schema" in err_msg):
+                        print(f"[check_at_least_one_account_admin] SCIM filter not supported, listing all users...")
+                        use_filter = False
+                        start_index = 1
+                        while True:
+                            response = account_client.api_client.do(
+                                "GET",
+                                f"/api/2.0/accounts/{account_id}/scim/v2/Users",
+                                query={"attributes": "userName,roles", "startIndex": start_index, "count": 2000},
+                            )
+                            resources = response.get("Resources", [])
+                            if not resources:
+                                break
+                            for resource in resources:
+                                roles = resource.get("roles", [])
+                                role_values = [r.get("value", "") for r in roles if isinstance(r, dict)]
+                                if "account_admin" in role_values:
+                                    name = resource.get("userName") or resource.get("id", "unknown")
+                                    account_admin_users.append(name)
+                                    print(f"[check_at_least_one_account_admin] Account admin: {name}")
+                            if len(resources) < 2000:
+                                break
+                            start_index += 2000
+                    else:
+                        raise
         except Exception as e:
             print(f"[check_at_least_one_account_admin] Error listing users: {e}")
             list_error = e
