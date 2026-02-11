@@ -1088,8 +1088,102 @@ def check_multiple_catalogs():
 
 
 def check_catalog_binding():
-    """Check if no catalog is bound to all workspaces."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Limited binding"}
+    """
+    Check that no catalog is bound to all workspaces (isolation best practice).
+
+    A catalog with isolation_mode OPEN is accessible from any workspace in the
+    metastore ("bound to all"). This check passes when every catalog is ISOLATED
+    (limited to an explicit set of workspaces).
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_catalog_binding] Starting check...")
+
+    try:
+        print("[check_catalog_binding] Getting workspace client...")
+        w = get_workspace_client()
+        if w is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Workspace client not available.",
+            }
+
+        catalogs_open = []
+        catalogs_isolated = []
+        catalogs_unknown = []
+        list_error = None
+
+        try:
+            for catalog in w.catalogs.list():
+                name = getattr(catalog, "name", None) or "unknown"
+                mode = getattr(catalog, "isolation_mode", None)
+                if mode is None:
+                    try:
+                        full = w.catalogs.get(name=name)
+                        mode = getattr(full, "isolation_mode", None)
+                    except Exception as e:
+                        print(f"[check_catalog_binding] Could not get isolation_mode for '{name}': {e}")
+                        catalogs_unknown.append(name)
+                        continue
+                mode_str = (mode.value if hasattr(mode, "value") else str(mode or "")).upper()
+                if mode_str == "OPEN":
+                    catalogs_open.append(name)
+                    print(f"[check_catalog_binding] Catalog '{name}' -> OPEN (bound to all workspaces)")
+                elif mode_str == "ISOLATED":
+                    catalogs_isolated.append(name)
+                    print(f"[check_catalog_binding] Catalog '{name}' -> ISOLATED (limited binding)")
+                else:
+                    catalogs_unknown.append(name)
+        except Exception as e:
+            print(f"[check_catalog_binding] Error listing catalogs: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing catalogs: {str(list_error)}",
+            }
+
+        total = len(catalogs_open) + len(catalogs_isolated) + len(catalogs_unknown)
+        if total == 0:
+            print("[check_catalog_binding] No catalogs found")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": "No catalogs found; cannot check workspace bindings.",
+            }
+
+        if catalogs_open:
+            print("[check_catalog_binding] FAIL - Some catalogs are bound to all workspaces (OPEN)")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Catalog(s) bound to all workspaces (OPEN): {', '.join(catalogs_open)}. Set isolation mode to ISOLATED and bind to specific workspaces only.",
+            }
+
+        print("[check_catalog_binding] PASS - No catalog is bound to all workspaces")
+        return {
+            "status": "pass",
+            "score": 2,
+            "max_score": 2,
+            "details": f"All {len(catalogs_isolated)} catalog(s) have limited workspace binding (ISOLATED).",
+        }
+
+    except Exception as e:
+        print(f"[check_catalog_binding] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking catalog binding: {str(e)}",
+        }
 
 
 def check_managed_tables_percentage():
