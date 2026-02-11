@@ -5,9 +5,14 @@
 # MAGIC This notebook creates **all** the infrastructure needed to test the 5 governance checks.
 # MAGIC
 # MAGIC ### What YOU need before running:
-# MAGIC 1. An **ADLS Gen 2** storage account + container
-# MAGIC 2. An **Azure Service Principal** (App Registration) with `Storage Blob Data Contributor` role on the storage account
-# MAGIC 3. The service principal's **Client ID**, **Client Secret**, and **Tenant ID**
+# MAGIC 1. An **ADLS Gen 2** storage account + a **test container** (e.g., `governance-test`)
+# MAGIC 2. **One of these** for authentication (pick the one that fits your org):
+# MAGIC
+# MAGIC | Option | What you need | When to use |
+# MAGIC |--------|---------------|-------------|
+# MAGIC | **A) Access Connector** (recommended) | Resource ID of your Access Connector + `Storage Blob Data Contributor` on the storage account | You already have an Access Connector (most UC workspaces do) |
+# MAGIC | **B) Service Principal** | Client ID + Secret + Tenant ID + `Storage Blob Data Contributor` on the storage account | You prefer explicit credentials |
+# MAGIC | **C) Existing credential** | Name of a Storage Credential already in Unity Catalog | You already set one up |
 # MAGIC
 # MAGIC ### What this notebook creates:
 # MAGIC | Asset | Purpose | Check it tests |
@@ -40,37 +45,68 @@ dbutils.library.restartPython()
 # MAGIC
 # MAGIC Fill in the widgets. The **prefix** is always required.
 # MAGIC
-# MAGIC - For **core tests** (Predictive Optimization only): just run with the prefix.
-# MAGIC - For **all tests**: fill in the Azure fields.
+# MAGIC - **Core tests only** (Predictive Optimization): just the prefix.
+# MAGIC - **All tests**: prefix + ADLS URL + one auth method (Access Connector OR Service Principal OR existing credential).
+# MAGIC
+# MAGIC ### How to find your Access Connector Resource ID:
+# MAGIC Azure Portal → your Resource Group → look for `Access Connector for Azure Databricks` →
+# MAGIC Properties → **Resource ID** (looks like `/subscriptions/.../resourceGroups/.../providers/Microsoft.Databricks/accessConnectors/...`)
 
 # COMMAND ----------
 
 # -- Widgets ----------------------------------------------------------------
 dbutils.widgets.text("prefix", "gov_test", "1. Resource prefix")
 dbutils.widgets.text("adls_container_url", "", "2. ADLS URL: abfss://container@account.dfs.core.windows.net")
-dbutils.widgets.text("sp_client_id", "", "3. Service Principal Client ID")
-dbutils.widgets.text("sp_client_secret", "", "4. Service Principal Client Secret")
-dbutils.widgets.text("sp_tenant_id", "", "5. Service Principal Tenant ID")
-dbutils.widgets.text("warehouse_id", "", "6. SQL Warehouse ID (for monitors, optional)")
+
+# Auth option A: Access Connector (recommended for Azure)
+dbutils.widgets.text("access_connector_id", "", "3a. Access Connector Resource ID (recommended)")
+
+# Auth option B: Service Principal
+dbutils.widgets.text("sp_client_id", "", "3b. Service Principal Client ID")
+dbutils.widgets.text("sp_client_secret", "", "3b. Service Principal Client Secret")
+dbutils.widgets.text("sp_tenant_id", "", "3b. Service Principal Tenant ID")
+
+# Auth option C: Existing credential
+dbutils.widgets.text("existing_credential_name", "", "3c. Existing Storage Credential name")
+
+# Optional
+dbutils.widgets.text("warehouse_id", "", "4. SQL Warehouse ID (for monitors, optional)")
 
 # -- Read parameters --------------------------------------------------------
 PREFIX = dbutils.widgets.get("prefix").strip()
 ADLS_URL = dbutils.widgets.get("adls_container_url").strip().rstrip("/") or None
+ACCESS_CONNECTOR_ID = dbutils.widgets.get("access_connector_id").strip() or None
 SP_CLIENT_ID = dbutils.widgets.get("sp_client_id").strip() or None
 SP_CLIENT_SECRET = dbutils.widgets.get("sp_client_secret").strip() or None
 SP_TENANT_ID = dbutils.widgets.get("sp_tenant_id").strip() or None
+EXISTING_CREDENTIAL = dbutils.widgets.get("existing_credential_name").strip() or None
 WAREHOUSE_ID = dbutils.widgets.get("warehouse_id").strip() or None
 
-AZURE_CONFIGURED = all([ADLS_URL, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TENANT_ID])
+# Determine which auth method is configured
+SP_CONFIGURED = all([SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TENANT_ID])
+AUTH_METHOD = None
+if EXISTING_CREDENTIAL:
+    AUTH_METHOD = "existing"
+elif ACCESS_CONNECTOR_ID:
+    AUTH_METHOD = "access_connector"
+elif SP_CONFIGURED:
+    AUTH_METHOD = "service_principal"
 
-print(f"Prefix:           {PREFIX}")
-print(f"ADLS URL:         {ADLS_URL or '(not set)'}")
-print(f"Service Principal: {'configured ✓' if AZURE_CONFIGURED else '(incomplete — external location + mount tests will be skipped)'}")
-print(f"Warehouse ID:     {WAREHOUSE_ID or '(not set — data quality monitor tests will be skipped)'}")
+STORAGE_CONFIGURED = ADLS_URL and AUTH_METHOD is not None
 
-if ADLS_URL and not AZURE_CONFIGURED:
-    print("\n⚠️  You provided an ADLS URL but not all Service Principal fields.")
-    print("   Fill in sp_client_id, sp_client_secret, and sp_tenant_id to enable all tests.")
+print(f"Prefix:             {PREFIX}")
+print(f"ADLS URL:           {ADLS_URL or '(not set)'}")
+print(f"Auth method:        ", end="")
+if AUTH_METHOD == "existing":
+    print(f"Existing credential '{EXISTING_CREDENTIAL}' ✓")
+elif AUTH_METHOD == "access_connector":
+    print(f"Access Connector ✓")
+elif AUTH_METHOD == "service_principal":
+    print(f"Service Principal ✓")
+else:
+    print("(not configured — external location + mount tests will be skipped)")
+print(f"Warehouse ID:       {WAREHOUSE_ID or '(not set — data quality monitor tests will be skipped)'}")
+print(f"Storage tests:      {'ENABLED ✓' if STORAGE_CONFIGURED else 'SKIPPED (need ADLS URL + auth method)'}")
 
 # COMMAND ----------
 
@@ -94,13 +130,28 @@ CAT_PO_OFF = f"{PREFIX}_po_off"
 SCHEMA_NAME = "test_data"
 
 # -- Create catalogs --------------------------------------------------------
+# Enterprise workspaces with Default Storage enabled require an explicit
+# MANAGED LOCATION for each catalog (no metastore root storage).
+# We use the ADLS container URL if provided, with a subfolder per catalog.
 for cat_name in [CAT_PO_ON, CAT_PO_OFF]:
     try:
-        w.catalogs.create(name=cat_name)
-        print(f"✓ Created catalog: {cat_name}")
+        if ADLS_URL:
+            managed_location = f"{ADLS_URL}/{cat_name}"
+            w.catalogs.create(name=cat_name, storage_root=managed_location)
+            print(f"✓ Created catalog: {cat_name}")
+            print(f"  Managed location: {managed_location}")
+        else:
+            # Try without location (works if metastore has a default root)
+            w.catalogs.create(name=cat_name)
+            print(f"✓ Created catalog: {cat_name} (using metastore default storage)")
     except Exception as e:
         if "already exists" in str(e).lower():
             print(f"• Catalog already exists: {cat_name}")
+        elif "storage root url" in str(e).lower() or "managed location" in str(e).lower():
+            print(f"✗ Error: Metastore has no default storage root.")
+            print(f"  Please provide the 'adls_container_url' widget so catalogs can be created")
+            print(f"  with an explicit managed location.")
+            raise
         else:
             raise
 
@@ -180,10 +231,10 @@ print(f"""
 # MAGIC ---
 # MAGIC ## 2. Storage Credential + External Locations
 # MAGIC
-# MAGIC **Requires:** ADLS URL + Service Principal credentials.
+# MAGIC **Requires:** ADLS URL + one of: Access Connector / Service Principal / existing credential name.
 # MAGIC
 # MAGIC This section creates:
-# MAGIC 1. A **Storage Credential** in Unity Catalog using your Azure Service Principal
+# MAGIC 1. A **Storage Credential** in Unity Catalog (skipped if using an existing one)
 # MAGIC 2. Two **External Locations** pointing to different paths but using the **same** credential
 # MAGIC 3. An **External Table at the root** of one external location
 # MAGIC
@@ -192,36 +243,70 @@ print(f"""
 
 # COMMAND ----------
 
-if AZURE_CONFIGURED:
-    from databricks.sdk.service.catalog import AzureServicePrincipal
-
-    CRED_NAME = f"{PREFIX}_credential"
+if STORAGE_CONFIGURED:
     EXT_LOC_1 = f"{PREFIX}_ext_loc_1"
     EXT_LOC_2 = f"{PREFIX}_ext_loc_2"
     EXT_URL_1 = f"{ADLS_URL}/{PREFIX}_loc1"
     EXT_URL_2 = f"{ADLS_URL}/{PREFIX}_loc2"
 
-    # -- Step 1: Create Storage Credential -----------------------------------
-    print("── Creating Storage Credential ──")
-    try:
-        w.storage_credentials.create(
-            name=CRED_NAME,
-            azure_service_principal=AzureServicePrincipal(
-                directory_id=SP_TENANT_ID,
-                application_id=SP_CLIENT_ID,
-                client_secret=SP_CLIENT_SECRET,
-            ),
-            comment=f"Test credential for governance checks (prefix: {PREFIX})",
-        )
-        print(f"✓ Created storage credential: {CRED_NAME}")
-    except Exception as e:
-        if "already exists" in str(e).lower():
-            print(f"• Storage credential already exists: {CRED_NAME}")
-        else:
-            print(f"✗ Error creating storage credential: {e}")
-            print("  Make sure your Service Principal has 'Storage Blob Data Contributor' role")
-            print("  on the ADLS Gen 2 storage account.")
-            raise
+    # -- Step 1: Resolve or create the Storage Credential --------------------
+    if AUTH_METHOD == "existing":
+        # Option C: Use a credential that already exists in Unity Catalog
+        CRED_NAME = EXISTING_CREDENTIAL
+        print(f"── Using existing Storage Credential: {CRED_NAME} ──")
+
+    elif AUTH_METHOD == "access_connector":
+        # Option A: Create credential using Azure Access Connector (Managed Identity)
+        from databricks.sdk.service.catalog import AzureManagedIdentity
+
+        CRED_NAME = f"{PREFIX}_credential"
+        print(f"── Creating Storage Credential via Access Connector ──")
+        try:
+            w.storage_credentials.create(
+                name=CRED_NAME,
+                azure_managed_identity=AzureManagedIdentity(
+                    access_connector_id=ACCESS_CONNECTOR_ID,
+                ),
+                comment=f"Test credential for governance checks (prefix: {PREFIX})",
+            )
+            print(f"✓ Created storage credential: {CRED_NAME}")
+            print(f"  Access Connector: {ACCESS_CONNECTOR_ID}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                print(f"• Storage credential already exists: {CRED_NAME}")
+            else:
+                print(f"✗ Error creating storage credential: {e}")
+                print("  Make sure:")
+                print("  1. The Access Connector resource ID is correct")
+                print("  2. The Access Connector's Managed Identity has 'Storage Blob Data Contributor'")
+                print("     role on your ADLS Gen 2 storage account")
+                raise
+
+    elif AUTH_METHOD == "service_principal":
+        # Option B: Create credential using Service Principal
+        from databricks.sdk.service.catalog import AzureServicePrincipal
+
+        CRED_NAME = f"{PREFIX}_credential"
+        print(f"── Creating Storage Credential via Service Principal ──")
+        try:
+            w.storage_credentials.create(
+                name=CRED_NAME,
+                azure_service_principal=AzureServicePrincipal(
+                    directory_id=SP_TENANT_ID,
+                    application_id=SP_CLIENT_ID,
+                    client_secret=SP_CLIENT_SECRET,
+                ),
+                comment=f"Test credential for governance checks (prefix: {PREFIX})",
+            )
+            print(f"✓ Created storage credential: {CRED_NAME}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                print(f"• Storage credential already exists: {CRED_NAME}")
+            else:
+                print(f"✗ Error creating storage credential: {e}")
+                print("  Make sure your Service Principal has 'Storage Blob Data Contributor' role")
+                print("  on the ADLS Gen 2 storage account.")
+                raise
 
     # -- Step 2: Create 2 External Locations with SAME credential (fail case) -
     print("\n── Creating External Locations (shared credential → FAIL case) ──")
@@ -300,7 +385,7 @@ if AZURE_CONFIGURED:
     """)
 else:
     print("⏭  Skipping external locations setup")
-    print("   To enable: fill in adls_container_url, sp_client_id, sp_client_secret, sp_tenant_id")
+    print("   To enable: fill in adls_container_url + one auth option (3a, 3b, or 3c)")
 
 # COMMAND ----------
 
@@ -308,14 +393,18 @@ else:
 # MAGIC ---
 # MAGIC ## 3. DBFS Mount
 # MAGIC
-# MAGIC **Requires:** ADLS URL + Service Principal credentials.
+# MAGIC **Requires:** ADLS URL + Service Principal credentials (options 3b).
 # MAGIC
-# MAGIC Creates a legacy DBFS mount using your Service Principal's OAuth credentials.
-# MAGIC This makes `check_no_dbfs_mounts` **FAIL**.
+# MAGIC DBFS mounts require direct storage credentials (Service Principal OAuth).
+# MAGIC Access Connectors and existing UC credentials **cannot** be used for DBFS mounts
+# MAGIC because mounts are a legacy Hadoop-level feature, not a Unity Catalog feature.
+# MAGIC
+# MAGIC If you're using the Access Connector option, this section will be **skipped** —
+# MAGIC that's fine, `check_no_dbfs_mounts` will just check your workspace's existing mounts.
 
 # COMMAND ----------
 
-if AZURE_CONFIGURED:
+if SP_CONFIGURED and ADLS_URL:
     MOUNT_POINT = f"/mnt/{PREFIX}_test_mount"
 
     # Parse storage account name from ADLS URL
@@ -359,6 +448,7 @@ if AZURE_CONFIGURED:
                 print(f"  Common issues:")
                 print(f"  - Service Principal doesn't have 'Storage Blob Data Contributor' on the storage account")
                 print(f"  - Firewall/network rules on the storage account blocking access")
+                print(f"  - DBFS mounts may be disabled on this workspace")
 
         print(f"""
     ┌───────────────────────────────────────────────────────┐
@@ -373,7 +463,15 @@ if AZURE_CONFIGURED:
         print(f"  Example:         abfss://data@mystorageaccount.dfs.core.windows.net")
 else:
     print("⏭  Skipping DBFS mount setup")
-    print("   To enable: fill in adls_container_url, sp_client_id, sp_client_secret, sp_tenant_id")
+    if AUTH_METHOD == "access_connector":
+        print("   DBFS mounts require Service Principal credentials (option 3b).")
+        print("   Access Connectors can't be used for legacy DBFS mounts.")
+        print("   The check_no_dbfs_mounts check will still work — it checks existing mounts in your workspace.")
+    elif AUTH_METHOD == "existing":
+        print("   DBFS mounts require Service Principal credentials (option 3b).")
+        print("   The check_no_dbfs_mounts check will still work — it checks existing mounts in your workspace.")
+    else:
+        print("   To enable: fill in adls_container_url + Service Principal credentials (3b)")
 
 # COMMAND ----------
 
@@ -511,12 +609,16 @@ print("\n" + "=" * 80)
 #     except Exception:
 #         pass
 
-# # 3. Delete storage credential
-# try:
-#     w.storage_credentials.delete(name=CRED_NAME, force=True)
-#     print(f"  ✓ Deleted storage credential: {CRED_NAME}")
-# except Exception:
-#     pass
+# # 3. Delete storage credential (only if we created it, not if using an existing one)
+# EXISTING_CREDENTIAL = dbutils.widgets.get("existing_credential_name").strip() or None
+# if not EXISTING_CREDENTIAL:
+#     try:
+#         w.storage_credentials.delete(name=CRED_NAME, force=True)
+#         print(f"  ✓ Deleted storage credential: {CRED_NAME}")
+#     except Exception:
+#         pass
+# else:
+#     print(f"  • Skipping credential deletion (using existing: {EXISTING_CREDENTIAL})")
 
 # # 4. Unmount DBFS
 # try:
