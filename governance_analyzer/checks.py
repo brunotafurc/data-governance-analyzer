@@ -10,12 +10,40 @@ from .clients import get_workspace_client, get_account_client, get_workspace_reg
 SYSTEM_CATALOGS = {'system', '__databricks_internal', 'hive_metastore', 'samples'}
 SYSTEM_MOUNT_POINTS = {'/', '/databricks-datasets', '/databricks-results', '/databricks', '/Volumes'}
 
+# Module-level catalog filter — when set, only these catalogs are scanned.
+# Use configure_catalog_filter() to set/clear it.
+_CATALOG_FILTER = None
+
+
+def configure_catalog_filter(catalogs=None):
+    """
+    Restrict governance checks to scan only specific catalogs.
+
+    Useful for testing or when you want to check a subset of catalogs
+    in a shared enterprise workspace.
+
+    Args:
+        catalogs: list of catalog names to scan, or None to scan all catalogs.
+
+    Example:
+        >>> configure_catalog_filter(["my_catalog_dev", "my_catalog_prod"])
+        >>> check_predictive_optimization()  # only scans those 2 catalogs
+        >>> configure_catalog_filter(None)   # reset to scan all
+    """
+    global _CATALOG_FILTER
+    _CATALOG_FILTER = set(catalogs) if catalogs else None
+    if _CATALOG_FILTER:
+        print(f"[configure_catalog_filter] Checks scoped to: {', '.join(sorted(_CATALOG_FILTER))}")
+    else:
+        print("[configure_catalog_filter] Checks will scan all catalogs")
+
 
 def _iter_catalogs_schemas(w):
     """
     Iterate all non-system (catalog, schema) pairs.
 
     Skips system catalogs, foreign catalogs, and information_schema.
+    Respects the catalog filter set via configure_catalog_filter().
     Handles permission errors gracefully by skipping inaccessible objects.
 
     Args:
@@ -33,6 +61,9 @@ def _iter_catalogs_schemas(w):
     for catalog in catalogs:
         cat_name = catalog.name
         if cat_name in SYSTEM_CATALOGS:
+            continue
+        # If a catalog filter is active, skip catalogs not in the filter
+        if _CATALOG_FILTER and cat_name not in _CATALOG_FILTER:
             continue
         cat_type = str(getattr(catalog, 'catalog_type', '') or '')
         if 'FOREIGN' in cat_type.upper():
@@ -1267,6 +1298,40 @@ def check_data_quality():
         monitored_tables = 0
         monitor_errors = 0
 
+        # Resolve how to check monitors — SDK versions and serverless environments
+        # may or may not have the lakehouse_monitors / quality_monitors attribute.
+        # We try three approaches in order:
+        #   1. w.lakehouse_monitors.get()  (SDK >= 0.20)
+        #   2. w.quality_monitors.get()    (older SDK)
+        #   3. REST API direct call        (works on any SDK / serverless)
+        monitor_api = None
+        use_rest_api = False
+
+        if hasattr(w, 'lakehouse_monitors'):
+            monitor_api = w.lakehouse_monitors
+            print("[check_data_quality] Using lakehouse_monitors API")
+        elif hasattr(w, 'quality_monitors'):
+            monitor_api = w.quality_monitors
+            print("[check_data_quality] Using quality_monitors API (older SDK)")
+        else:
+            use_rest_api = True
+            print("[check_data_quality] Using REST API fallback (SDK monitor APIs not available)")
+
+        def _has_monitor(table_full_name):
+            """Check if a table has a monitor, using whatever API is available."""
+            if monitor_api:
+                monitor = monitor_api.get(table_name=table_full_name)
+                return monitor is not None
+            else:
+                # REST API fallback — works on serverless and any SDK version
+                import urllib.parse
+                encoded_name = urllib.parse.quote(table_full_name, safe='')
+                response = w.api_client.do(
+                    'GET',
+                    f'/api/2.1/unity-catalog/tables/{encoded_name}/monitor'
+                )
+                return response is not None
+
         print("[check_data_quality] Iterating catalogs/schemas/tables...")
         for catalog, schema, table in _iter_schemas_tables(w, skip_views=True):
             table_type = str(getattr(table, 'table_type', '') or '').upper()
@@ -1276,17 +1341,17 @@ def check_data_quality():
             total_tables += 1
             full_name = f"{catalog.name}.{schema.name}.{table.name}"
 
-            # Check if a Lakehouse Monitor exists for this table
+            # Check if a monitor exists for this table
             try:
-                monitor = w.lakehouse_monitors.get(table_name=full_name)
-                if monitor:
+                if _has_monitor(full_name):
                     monitored_tables += 1
                     print(f"[check_data_quality] Monitor active: {full_name}")
             except Exception as e:
                 error_msg = str(e).lower()
                 if any(k in error_msg for k in ("not found", "does not exist",
                                                   "resource_does_not_exist",
-                                                  "invalid_parameter_value")):
+                                                  "invalid_parameter_value",
+                                                  "404")):
                     pass  # No monitor configured for this table - expected
                 else:
                     monitor_errors += 1

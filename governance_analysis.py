@@ -17,6 +17,7 @@ dbutils.widgets.text("schema_name", "default", "Schema Name")
 dbutils.widgets.text("account_id", "", "Account ID (optional)")
 dbutils.widgets.text("client_id", "", "Client ID (optional)")
 dbutils.widgets.text("client_secret", "", "Client Secret (optional)")
+dbutils.widgets.text("catalog_filter", "", "Catalog filter - comma-separated catalog names to scan (optional, empty = all)")
 
 # Get parameter values
 catalog_name = dbutils.widgets.get("catalog_name")
@@ -24,11 +25,16 @@ schema_name = dbutils.widgets.get("schema_name")
 account_id = dbutils.widgets.get("account_id") or None
 client_id = dbutils.widgets.get("client_id") or None
 client_secret = dbutils.widgets.get("client_secret") or None
+catalog_filter_raw = dbutils.widgets.get("catalog_filter").strip() or None
 
 print(f"Using catalog: {catalog_name}")
 print(f"Using schema: {schema_name}")
 if account_id:
     print(f"Account-level authentication: enabled")
+if catalog_filter_raw:
+    print(f"Catalog filter: {catalog_filter_raw}")
+else:
+    print(f"Catalog filter: (none — scanning all catalogs)")
 
 # COMMAND ----------
 
@@ -47,6 +53,13 @@ if account_id:
         client_id=client_id,
         client_secret=client_secret
     )
+
+# Configure catalog filter if provided (limits which catalogs checks will scan)
+if catalog_filter_raw:
+    filter_list = [c.strip() for c in catalog_filter_raw.split(",") if c.strip()]
+    ga.configure_catalog_filter(filter_list)
+else:
+    ga.configure_catalog_filter(None)  # Scan all catalogs
 
 # COMMAND ----------
 

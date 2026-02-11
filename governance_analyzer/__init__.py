@@ -9,6 +9,7 @@ from .clients import (
 )
 
 from .checks import (
+    configure_catalog_filter,
     check_metastore_connected,
     check_metastore_region,
     check_scim_aim_provisioning,

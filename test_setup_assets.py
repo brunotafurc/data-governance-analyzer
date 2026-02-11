@@ -490,6 +490,43 @@ if WAREHOUSE_ID:
     MONITOR_ASSETS_DIR = f"/Shared/{PREFIX}_monitor_assets"
     tables_to_monitor = PO_ON_TABLES[:4]  # Monitor 4 of 7 tables in PO-ON catalog
 
+    # Resolve the monitor API — SDK versions and serverless may differ.
+    # Try SDK APIs first, then fall back to REST API.
+    monitor_api = None
+    use_rest_api = False
+    if hasattr(w, 'lakehouse_monitors'):
+        monitor_api = w.lakehouse_monitors
+        print("Using: w.lakehouse_monitors API")
+    elif hasattr(w, 'quality_monitors'):
+        monitor_api = w.quality_monitors
+        print("Using: w.quality_monitors API (older SDK version)")
+    else:
+        use_rest_api = True
+        print("Using: REST API fallback (SDK monitor APIs not available on this compute)")
+
+    def _create_monitor(table_name, assets_dir, output_schema, warehouse_id):
+        """Create a monitor using whatever API is available."""
+        if monitor_api:
+            monitor_api.create(
+                table_name=table_name,
+                assets_dir=assets_dir,
+                output_schema_name=output_schema,
+                snapshot={},
+                warehouse_id=warehouse_id,
+            )
+        else:
+            import json
+            w.api_client.do(
+                'POST',
+                f'/api/2.1/unity-catalog/tables/{table_name}/monitor',
+                body=json.dumps({
+                    "assets_dir": assets_dir,
+                    "output_schema_name": output_schema,
+                    "snapshot": {},
+                    "warehouse_id": warehouse_id,
+                }).encode('utf-8'),
+            )
+
     print(f"── Creating Lakehouse Monitors ──")
     print(f"  Warehouse: {WAREHOUSE_ID}")
     print(f"  Output:    {MONITOR_OUTPUT_SCHEMA}")
@@ -500,13 +537,7 @@ if WAREHOUSE_ID:
     for tbl in tables_to_monitor:
         full_name = f"{CAT_PO_ON}.{SCHEMA_NAME}.{tbl}"
         try:
-            w.lakehouse_monitors.create(
-                table_name=full_name,
-                assets_dir=MONITOR_ASSETS_DIR,
-                output_schema_name=MONITOR_OUTPUT_SCHEMA,
-                snapshot={},  # Snapshot-based monitoring (simplest)
-                warehouse_id=WAREHOUSE_ID,
-            )
+            _create_monitor(full_name, MONITOR_ASSETS_DIR, MONITOR_OUTPUT_SCHEMA, WAREHOUSE_ID)
             print(f"  ✓ Monitor created: {full_name}")
             created += 1
         except Exception as e:
@@ -537,10 +568,17 @@ else:
 # MAGIC ## 5. Run All 5 Governance Checks
 # MAGIC
 # MAGIC This is the moment of truth — let's see if our checks detect the assets we created.
+# MAGIC
+# MAGIC We **scope the checks to only our test catalogs** so they don't scan the entire
+# MAGIC enterprise workspace. In the real `governance_analysis.py`, this filter is not set
+# MAGIC and all catalogs are scanned.
 
 # COMMAND ----------
 
 import governance_analyzer as ga
+
+# Scope checks to only scan our test catalogs (not the whole workspace)
+ga.configure_catalog_filter([CAT_PO_ON, CAT_PO_OFF])
 
 checks_to_test = [
     ("Predictive Optimization", "≥70% managed tables with PO",  ga.check_predictive_optimization),
@@ -593,13 +631,15 @@ print("\n" + "=" * 80)
 # print("── Cleaning up test assets ──\n")
 
 # # 1. Delete Lakehouse Monitors
-# for tbl in PO_ON_TABLES[:4]:
-#     full_name = f"{CAT_PO_ON}.{SCHEMA_NAME}.{tbl}"
-#     try:
-#         w.lakehouse_monitors.delete(table_name=full_name)
-#         print(f"  ✓ Deleted monitor: {full_name}")
-#     except Exception:
-#         pass
+# monitor_api = getattr(w, 'lakehouse_monitors', None) or getattr(w, 'quality_monitors', None)
+# if monitor_api:
+#     for tbl in PO_ON_TABLES[:4]:
+#         full_name = f"{CAT_PO_ON}.{SCHEMA_NAME}.{tbl}"
+#         try:
+#             monitor_api.delete(table_name=full_name)
+#             print(f"  ✓ Deleted monitor: {full_name}")
+#         except Exception:
+#             pass
 
 # # 2. Delete external locations
 # for loc_name in [f"{PREFIX}_ext_loc_1", f"{PREFIX}_ext_loc_2"]:
@@ -634,5 +674,9 @@ print("\n" + "=" * 80)
 #         print(f"  ✓ Dropped catalog: {cat_name}")
 #     except Exception as e:
 #         print(f"  ✗ Error dropping {cat_name}: {e}")
+
+# # 6. Reset catalog filter
+# import governance_analyzer as ga
+# ga.configure_catalog_filter(None)
 
 # print("\n✓ All test assets cleaned up!")
