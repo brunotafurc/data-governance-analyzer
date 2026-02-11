@@ -1092,27 +1092,13 @@ def check_catalog_binding():
     return {"status": "pass", "score": 2, "max_score": 2, "details": "Limited binding"}
 
 
-def _table_type_to_count(ttype):
-    """Map table_type to bucket: 'managed', 'external', or 'view'. Returns None if unknown."""
-    if ttype is None:
-        return None
-    ttype_str = str(ttype).upper() if ttype else ""
-    if ttype_str == "MANAGED":
-        return "managed"
-    if ttype_str == "EXTERNAL":
-        return "external"
-    if "VIEW" in ttype_str or ttype_str == "VIEW":
-        return "view"
-    return None
-
-
 def check_managed_tables_percentage():
     """
-    Check if managed tables (and volumes) are more than 70% of all data tables/volumes.
+    Check if managed tables and volumes are more than 70% of all tables and volumes.
 
-    Uses list_summaries(catalog_name, schema_name_pattern="%") to get all tables
-    per catalog in one call (two loops: catalogs -> table summaries). Counts
-    MANAGED vs EXTERNAL; views are excluded from the percentage. Passes when managed_pct > 70.
+    Iterates over all catalogs and schemas, counts tables (MANAGED, EXTERNAL; views excluded
+    from denominator) and volumes by type, and passes when (managed_tables + managed_volumes)
+    / (total_tables + total_volumes) * 100 > 70.
 
     Returns:
         dict: Status with score, max_score, and details
@@ -1130,11 +1116,11 @@ def check_managed_tables_percentage():
                 "max_score": 2,
                 "details": "Workspace client not available.",
             }
-        print("[check_managed_tables_percentage] Workspace client obtained")
 
-        managed_count = 0
-        external_count = 0
-        view_count = 0
+        managed_tables = 0
+        external_tables = 0
+        managed_volumes = 0
+        external_volumes = 0
         list_error = None
 
         try:
@@ -1143,24 +1129,43 @@ def check_managed_tables_percentage():
                 if not catalog_name:
                     continue
                 try:
-                    # One call per catalog: all table summaries across all schemas (no schema loop)
-                    for summary in w.tables.list_summaries(
-                        catalog_name=catalog_name,
-                        schema_name_pattern="%",
-                        max_results=0,
-                    ):
-                        ttype = getattr(summary, "table_type", None)
-                        bucket = _table_type_to_count(ttype)
-                        if bucket == "managed":
-                            managed_count += 1
-                        elif bucket == "external":
-                            external_count += 1
-                        elif bucket == "view":
-                            view_count += 1
-                except Exception as catalog_err:
-                    print(f"[check_managed_tables_percentage] Catalog {catalog_name}: {catalog_err}")
+                    for schema in w.schemas.list(catalog_name=catalog_name):
+                        schema_name = getattr(schema, "name", None) or ""
+                        if not schema_name:
+                            continue
+                        try:
+                            for table in w.tables.list(
+                                catalog_name=catalog_name,
+                                schema_name=schema_name,
+                                max_results=0,
+                            ):
+                                tt = getattr(table, "table_type", None)
+                                tt_str = (tt.value if hasattr(tt, "value") else str(tt or "")).upper()
+                                if tt_str == "MANAGED":
+                                    managed_tables += 1
+                                elif tt_str == "EXTERNAL":
+                                    external_tables += 1
+                                # VIEW, etc. excluded from denominator
+                        except Exception as e:
+                            print(f"[check_managed_tables_percentage] Error listing tables in {catalog_name}.{schema_name}: {e}")
+                        try:
+                            for volume in w.volumes.list(
+                                catalog_name=catalog_name,
+                                schema_name=schema_name,
+                                max_results=0,
+                            ):
+                                vt = getattr(volume, "volume_type", None)
+                                vt_str = (vt.value if hasattr(vt, "value") else str(vt or "")).upper()
+                                if vt_str == "MANAGED":
+                                    managed_volumes += 1
+                                elif vt_str == "EXTERNAL":
+                                    external_volumes += 1
+                        except Exception as e:
+                            print(f"[check_managed_tables_percentage] Error listing volumes in {catalog_name}.{schema_name}: {e}")
+                except Exception as e:
+                    print(f"[check_managed_tables_percentage] Error listing schemas in {catalog_name}: {e}")
         except Exception as e:
-            print(f"[check_managed_tables_percentage] Error listing tables: {e}")
+            print(f"[check_managed_tables_percentage] Error listing catalogs/tables/volumes: {e}")
             list_error = e
 
         if list_error is not None:
@@ -1168,40 +1173,41 @@ def check_managed_tables_percentage():
                 "status": "error",
                 "score": 0,
                 "max_score": 2,
-                "details": f"Error listing tables: {str(list_error)}",
+                "details": f"Error listing tables/volumes: {str(list_error)}",
             }
 
-        data_tables = managed_count + external_count
-        if data_tables == 0:
-            print("[check_managed_tables_percentage] No data tables (managed+external) found")
+        total_tables = managed_tables + external_tables
+        total_volumes = managed_volumes + external_volumes
+        total = total_tables + total_volumes
+        managed_total = managed_tables + managed_volumes
+
+        if total == 0:
+            print("[check_managed_tables_percentage] No tables or volumes found")
             return {
                 "status": "warning",
                 "score": 1,
                 "max_score": 2,
-                "details": f"No managed or external tables found (views: {view_count}). Create tables to measure.",
+                "details": "No tables or volumes found in Unity Catalog; cannot compute managed percentage.",
             }
 
-        managed_pct = round((managed_count / data_tables) * 100.0, 2)
-        print(
-            f"[check_managed_tables_percentage] Managed: {managed_count}, external: {external_count}, "
-            f"views: {view_count}, managed %: {managed_pct}%"
-        )
+        pct = round((managed_total / total) * 100.0, 2)
+        print(f"[check_managed_tables_percentage] Tables: {managed_tables} managed, {external_tables} external; Volumes: {managed_volumes} managed, {external_volumes} external; {pct}% managed")
 
-        if managed_pct > MANAGED_PCT_THRESHOLD:
-            print(f"[check_managed_tables_percentage] PASS - {managed_pct}% managed (above {MANAGED_PCT_THRESHOLD}%)")
+        if pct > MANAGED_PCT_THRESHOLD:
+            print(f"[check_managed_tables_percentage] PASS - {pct}% managed (above {MANAGED_PCT_THRESHOLD}%)")
             return {
                 "status": "pass",
                 "score": 2,
                 "max_score": 2,
-                "details": f"{managed_pct}% of data tables are managed ({managed_count}/{data_tables}), above {MANAGED_PCT_THRESHOLD}% threshold.",
+                "details": f"{pct}% of tables and volumes are managed ({managed_total}/{total}), above {MANAGED_PCT_THRESHOLD}% threshold.",
             }
 
-        print(f"[check_managed_tables_percentage] FAIL - {managed_pct}% managed (at or below {MANAGED_PCT_THRESHOLD}%)")
+        print(f"[check_managed_tables_percentage] FAIL - {pct}% managed (at or below {MANAGED_PCT_THRESHOLD}%)")
         return {
             "status": "fail",
             "score": 0,
             "max_score": 2,
-            "details": f"{managed_pct}% of data tables are managed ({managed_count}/{data_tables}). Best practice: use managed tables for > {MANAGED_PCT_THRESHOLD}%.",
+            "details": f"{pct}% of tables and volumes are managed ({managed_total}/{total}). Best practice: use managed tables/volumes for > {MANAGED_PCT_THRESHOLD}%.",
         }
 
     except Exception as e:
