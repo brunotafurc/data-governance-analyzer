@@ -733,7 +733,7 @@ def check_catalog_admin_group():
 
         print("[check_catalog_admin_group] Listing catalogs...")
         try:
-            for catalog in w.catalogs.list():
+            for catalog in w.catalogs.list(include_unbound=True):
                 name = getattr(catalog, "name", None) or "unknown"
                 owner = getattr(catalog, "owner", None)
                 if owner is None:
@@ -764,7 +764,7 @@ def check_catalog_admin_group():
                     print(f"[check_catalog_admin_group] Catalog '{name}' owner '{owner}' -> service_principal")
                 else:
                     catalogs_unknown.append(name)
-                    print(f"[check_catalog_admin_group] Catalog '{name}' owner '{owner}' -> unknown")
+                    print(f"[check_catalog_admin_group] Catalog '{name}' owner '{owner}' owner type {owner_type} -> unknown")
         except Exception as e:
             print(f"[check_catalog_admin_group] Error listing catalogs: {e}")
             list_error = e
