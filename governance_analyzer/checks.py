@@ -872,7 +872,7 @@ def check_at_least_one_account_admin():
         try:
             if hasattr(account_client, "users_v2"):
                 print("[check_at_least_one_account_admin] Listing account users (users_v2)...")
-                for user in account_client.users_v2.list(attributes="id,userName,roles",filter="roles[value eq 'account_admin']"):
+                for user in account_client.users_v2.list(attributes="id,userName,roles"):
                     roles = getattr(user, "roles", []) or []
                     if any(getattr(r, "value", "") == "account_admin" for r in roles):
                         name = getattr(user, "user_name", None) or getattr(user, "id", "unknown")
