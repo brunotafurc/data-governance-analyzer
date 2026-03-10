@@ -666,19 +666,416 @@ def check_workspace_admin_group():
         }
 
 
+def _catalog_owner_is_group(w, owner, catalog_name):
+    """
+    Determine if the given owner string is a group (or system).
+    Returns (is_ok_for_governance, owner_type) where is_ok = True for group or 'system user'.
+    """
+    if not owner:
+        return False, "unknown"
+    if owner.lower() == "system user":
+        return True, "system"
+    is_group = False
+    owner_type = "unknown"
+    try:
+        for _ in w.groups.list(filter=f'displayName eq "{owner}"'):
+            is_group = True
+            owner_type = "group"
+            break
+    except Exception:
+        pass
+    if not is_group:
+        if "@" in owner:
+            owner_type = "user"
+        else:
+            try:
+                for _ in w.service_principals.list(filter=f'displayName eq "{owner}"'):
+                    owner_type = "service_principal"
+                    break
+            except Exception:
+                pass
+    return (is_group or owner_type == "group"), owner_type
+
+
 def check_catalog_admin_group():
-    """Check if Catalog Admin role is assigned to group."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Assigned to group"}
+    """
+    Check if for every catalog the owner (admin) is a group of users.
+
+    Uses the catalogs list API to enumerate catalogs, then for each catalog
+    determines whether the owner is a group, a user, or a service principal.
+    Passes only when all catalogs have a group (or system) as owner.
+
+    The check is executed at the workspace level, so it will check all catalogs in the workspace.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_catalog_admin_group] Starting check...")
+
+    try:
+        print("[check_catalog_admin_group] Getting workspace client...")
+        w = get_workspace_client()
+        if w is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Workspace client not available. Configure Databricks workspace credentials (e.g. DATABRICKS_HOST, token or OAuth).",
+            }
+        print("[check_catalog_admin_group] Workspace client obtained")
+
+        catalogs_with_group = []
+        catalogs_with_user = []
+        catalogs_with_sp = []
+        catalogs_unknown = []
+        list_error = None
+        catalog_names_checked = []
+
+        print("[check_catalog_admin_group] Listing catalogs...")
+        try:
+            for catalog in w.catalogs.list():
+                name = getattr(catalog, "name", None) or "unknown"
+                owner = getattr(catalog, "owner", None)
+                if owner is None:
+                    try:
+                        full = w.catalogs.get(name=name)
+                        owner = getattr(full, "owner", None)
+                    except Exception as e:
+                        print(f"[check_catalog_admin_group] Could not get owner for catalog '{name}': {e}")
+                        catalogs_unknown.append(name)
+                        catalog_names_checked.append(name)
+                        print(f"[check_catalog_admin_group] Catalog '{name}' -> owner unknown")
+                        continue
+                if not owner:
+                    catalogs_unknown.append(name)
+                    catalog_names_checked.append(name)
+                    print(f"[check_catalog_admin_group] Catalog '{name}' -> owner unknown (empty)")
+                    continue
+                catalog_names_checked.append(name)
+                is_ok, owner_type = _catalog_owner_is_group(w, owner, name)
+                if is_ok:
+                    catalogs_with_group.append((name, owner))
+                    print(f"[check_catalog_admin_group] Catalog '{name}' owner '{owner}' -> group")
+                elif owner_type == "user":
+                    catalogs_with_user.append((name, owner))
+                    print(f"[check_catalog_admin_group] Catalog '{name}' owner '{owner}' -> user")
+                elif owner_type == "service_principal":
+                    catalogs_with_sp.append((name, owner))
+                    print(f"[check_catalog_admin_group] Catalog '{name}' owner '{owner}' -> service_principal")
+                else:
+                    catalogs_unknown.append(name)
+                    print(f"[check_catalog_admin_group] Catalog '{name}' owner '{owner}' owner type {owner_type} -> unknown")
+        except Exception as e:
+            print(f"[check_catalog_admin_group] Error listing catalogs: {e}")
+            list_error = e
+
+        if catalog_names_checked:
+            print(f"[check_catalog_admin_group] Catalogs checked ({len(catalog_names_checked)}): {', '.join(catalog_names_checked)}")
+        print(f"[check_catalog_admin_group] Catalogs with group: {len(catalogs_with_group)}, with user: {len(catalogs_with_user)}, with service_principal: {len(catalogs_with_sp)}, unknown: {len(catalogs_unknown)}")
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing catalogs: {str(list_error)}",
+            }
+
+        total = len(catalogs_with_group) + len(catalogs_with_user) + len(catalogs_with_sp) + len(catalogs_unknown)
+        if total == 0:
+            print("[check_catalog_admin_group] No catalogs found binded to this workspace")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": "No catalogs found binded to this workspace. Create catalogs and assign group ownership for governance.",
+            }
+
+        if catalogs_with_user or catalogs_with_sp or catalogs_unknown:
+            print("[check_catalog_admin_group] FAIL - Not all catalogs have group ownership")
+            parts = []
+            if catalogs_with_user:
+                parts.append(f"owned by user(s): {', '.join(n for n, _ in catalogs_with_user)}")
+            if catalogs_with_sp:
+                parts.append(f"owned by service principal(s): {', '.join(n for n, _ in catalogs_with_sp)}")
+            if catalogs_unknown:
+                parts.append(f"owner unknown: {', '.join(catalogs_unknown)}")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Not all catalogs have group ownership. {'; '.join(parts)}. Assign catalog ownership to groups."
+            }
+
+        print("[check_catalog_admin_group] PASS - All catalogs have group (or system) ownership")
+        group_list = ", ".join(f"'{n}' ({o})" for n, o in catalogs_with_group[:10])
+        if len(catalogs_with_group) > 10:
+            group_list += f" and {len(catalogs_with_group) - 10} more"
+        return {
+            "status": "pass",
+            "score": 2,
+            "max_score": 2,
+            "details": f"All {len(catalogs_with_group)} catalog(s) have group or system ownership: {group_list} for this workspace",
+        }
+
+    except ImportError as e:
+        print(f"[check_catalog_admin_group] ImportError: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": str(e),
+        }
+    except Exception as e:
+        print(f"[check_catalog_admin_group] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking catalog admin group: {str(e)}",
+        }
 
 
 def check_at_least_one_account_admin():
-    """Check if at least 1 user is account admin."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "3 account admins"}
+    """
+    Check if at least 1 user has the Account Admin role.
+
+    Lists account users (via account-level SCIM / users API), counts how many
+    have the account_admin role, and passes only when that count is >= 1.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_at_least_one_account_admin] Starting check...")
+
+    try:
+        print("[check_at_least_one_account_admin] Getting account client...")
+        account_client = get_account_client()
+
+        if not account_client:
+            print("[check_at_least_one_account_admin] No account client available")
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Cannot check account admins: Account-level credentials not configured (DATABRICKS_ACCOUNT_ID, etc.).",
+            }
+
+        print("[check_at_least_one_account_admin] Account client obtained")
+
+        account_admin_users = []
+        list_error = None
+
+        # Do not use a SCIM filter: Databricks account SCIM does not support filtering
+        # by roles (roles.value or roles[value eq "..."] cause invalidValue / not supported).
+        # List users with attributes id,userName,roles and filter in code.
+        try:
+            if hasattr(account_client, "users_v2"):
+                print("[check_at_least_one_account_admin] Listing account users (users_v2)...")
+                for user in account_client.users_v2.list(attributes="id,userName,roles"):
+                    roles = getattr(user, "roles", []) or []
+                    if any(getattr(r, "value", "") == "account_admin" for r in roles):
+                        name = getattr(user, "user_name", None) or getattr(user, "id", "unknown")
+                        account_admin_users.append(name)
+                        print(f"[check_at_least_one_account_admin] Account admin: {name}")
+            else:
+                account_id = get_account_id()
+                if not account_id:
+                    return {
+                        "status": "error",
+                        "score": 0,
+                        "max_score": 2,
+                        "details": "Account ID not configured; cannot list users.",
+                    }
+                print("[check_at_least_one_account_admin] Listing account users (SCIM)...")
+                start_index = 1
+                count = 2000
+                while True:
+                    response = account_client.api_client.do(
+                        "GET",
+                        f"/api/2.0/accounts/{account_id}/scim/v2/Users",
+                        query={"attributes": "userName,roles", "startIndex": start_index, "count": count},
+                    )
+                    resources = response.get("Resources", [])
+                    if not resources:
+                        break
+                    for resource in resources:
+                        roles = resource.get("roles", [])
+                        role_values = [r.get("value", "") for r in roles if isinstance(r, dict)]
+                        if "account_admin" in role_values:
+                            name = resource.get("userName") or resource.get("id", "unknown")
+                            account_admin_users.append(name)
+                            print(f"[check_at_least_one_account_admin] Account admin: {name}")
+                    if len(resources) < count:
+                        break
+                    start_index += count
+        except Exception as e:
+            print(f"[check_at_least_one_account_admin] Error listing users: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing account users: {str(list_error)}",
+            }
+
+        num_admins = len(account_admin_users)
+        print(f"[check_at_least_one_account_admin] Found {num_admins} account admin(s)")
+
+        if num_admins >= 1:
+            print("[check_at_least_one_account_admin] PASS - At least one account admin")
+            admins_detail = ", ".join(account_admin_users[:10])
+            if num_admins > 10:
+                admins_detail += f" and {num_admins - 10} more"
+            return {
+                "status": "pass",
+                "score": 2,
+                "max_score": 2,
+                "details": f"{num_admins} account admin(s): {admins_detail}",
+            }
+
+        print("[check_at_least_one_account_admin] FAIL - No account admin found")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": 2,
+            "details": "No user with Account Admin role found. Assign the account_admin role to at least one user or group in Account Settings → User management.",
+        }
+
+    except Exception as e:
+        print(f"[check_at_least_one_account_admin] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking account admins: {str(e)}",
+        }
 
 
 def check_account_admin_percentage():
-    """Check if less than 5% of users are Account Admin."""
-    return {"status": "pass", "score": 1, "max_score": 1, "details": "2% are admins"}
+    """
+    Check if less than 5% of users are Account Admin.
+
+    Lists account users, counts how many have the account_admin role, and passes
+    only when (account_admins / total_users) * 100 < 5.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    ADMIN_PCT_THRESHOLD = 5.0
+    print("[check_account_admin_percentage] Starting check...")
+
+    try:
+        print("[check_account_admin_percentage] Getting account client...")
+        account_client = get_account_client()
+
+        if not account_client:
+            print("[check_account_admin_percentage] No account client available — check skipped")
+            return {
+                "status": "warning",
+                "score": 0,
+                "max_score": 1,
+                "details": (
+                    "Account-level credentials not configured; check skipped. "
+                    "Set DATABRICKS_ACCOUNT_ID (and optionally client_id/secret) to run this check."
+                ),
+            }
+
+        print("[check_account_admin_percentage] Account client obtained")
+
+        total_users = 0
+        account_admin_count = 0
+        list_error = None
+
+        try:
+            if hasattr(account_client, "users_v2"):
+                print("[check_account_admin_percentage] Listing account users (users_v2)...")
+                for user in account_client.users_v2.list(attributes="id,userName,roles"):
+                    total_users += 1
+                    roles = getattr(user, "roles", []) or []
+                    if any(getattr(r, "value", "") == "account_admin" for r in roles):
+                        account_admin_count += 1
+            else:
+                account_id = get_account_id()
+                if not account_id:
+                    return {
+                        "status": "error",
+                        "score": 0,
+                        "max_score": 1,
+                        "details": "Account ID not configured; cannot list users.",
+                    }
+                print("[check_account_admin_percentage] Listing account users (SCIM)...")
+                start_index = 1
+                count = 2000
+                while True:
+                    response = account_client.api_client.do(
+                        "GET",
+                        f"/api/2.0/accounts/{account_id}/scim/v2/Users",
+                        query={"attributes": "userName,roles", "startIndex": start_index, "count": count},
+                    )
+                    resources = response.get("Resources", [])
+                    if not resources:
+                        break
+                    for resource in resources:
+                        total_users += 1
+                        roles = resource.get("roles", [])
+                        role_values = [r.get("value", "") for r in roles if isinstance(r, dict)]
+                        if "account_admin" in role_values:
+                            account_admin_count += 1
+                    if len(resources) < count:
+                        break
+                    start_index += count
+        except Exception as e:
+            print(f"[check_account_admin_percentage] Error listing users: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 1,
+                "details": f"Error listing account users: {str(list_error)}",
+            }
+
+        if total_users == 0:
+            print("[check_account_admin_percentage] No users found")
+            return {
+                "status": "warning",
+                "score": 0,
+                "max_score": 1,
+                "details": "No account users found; cannot compute admin percentage.",
+            }
+
+        pct = round((account_admin_count / total_users) * 100.0, 2)
+        print(f"[check_account_admin_percentage] Total users: {total_users}, account admins: {account_admin_count}, percentage: {pct}%")
+
+        if pct < ADMIN_PCT_THRESHOLD:
+            print(f"[check_account_admin_percentage] PASS - {pct}% are account admins (below {ADMIN_PCT_THRESHOLD}%)")
+            return {
+                "status": "pass",
+                "score": 1,
+                "max_score": 1,
+                "details": f"{pct}% of users are Account Admin ({account_admin_count}/{total_users}), below {ADMIN_PCT_THRESHOLD}% threshold.",
+            }
+
+        print(f"[check_account_admin_percentage] FAIL - {pct}% are account admins (at or above {ADMIN_PCT_THRESHOLD}%)")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": 1,
+            "details": f"{pct}% of users are Account Admin ({account_admin_count}/{total_users}). Best practice: keep under {ADMIN_PCT_THRESHOLD}%.",
+        }
+
+    except Exception as e:
+        print(f"[check_account_admin_percentage] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 1,
+            "details": f"Error checking account admin percentage: {str(e)}",
+        }
 
 
 # =============================================================================
@@ -691,13 +1088,230 @@ def check_multiple_catalogs():
 
 
 def check_catalog_binding():
-    """Check if no catalog is bound to all workspaces."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "Limited binding"}
+    """
+    Check that no catalog is bound to all workspaces (isolation best practice).
+
+    A catalog with isolation_mode OPEN is accessible from any workspace in the
+    metastore ("bound to all"). This check passes when every catalog is ISOLATED
+    (limited to an explicit set of workspaces).
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_catalog_binding] Starting check...")
+
+    try:
+        print("[check_catalog_binding] Getting workspace client...")
+        w = get_workspace_client()
+        if w is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Workspace client not available.",
+            }
+
+        catalogs_open = []
+        catalogs_isolated = []
+        catalogs_unknown = []
+        list_error = None
+
+        try:
+            for catalog in w.catalogs.list():
+                name = getattr(catalog, "name", None) or "unknown"
+                mode = getattr(catalog, "isolation_mode", None)
+                if mode is None:
+                    try:
+                        full = w.catalogs.get(name=name)
+                        mode = getattr(full, "isolation_mode", None)
+                    except Exception as e:
+                        print(f"[check_catalog_binding] Could not get isolation_mode for '{name}': {e}")
+                        catalogs_unknown.append(name)
+                        continue
+                mode_str = (mode.value if hasattr(mode, "value") else str(mode or "")).upper()
+                if mode_str == "OPEN":
+                    catalogs_open.append(name)
+                    print(f"[check_catalog_binding] Catalog '{name}' -> OPEN (bound to all workspaces)")
+                elif mode_str == "ISOLATED":
+                    catalogs_isolated.append(name)
+                    print(f"[check_catalog_binding] Catalog '{name}' -> ISOLATED (limited binding)")
+                else:
+                    catalogs_unknown.append(name)
+        except Exception as e:
+            print(f"[check_catalog_binding] Error listing catalogs: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing catalogs: {str(list_error)}",
+            }
+
+        total = len(catalogs_open) + len(catalogs_isolated) + len(catalogs_unknown)
+        if total == 0:
+            print("[check_catalog_binding] No catalogs found")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": "No catalogs found; cannot check workspace bindings.",
+            }
+
+        if catalogs_open:
+            print("[check_catalog_binding] FAIL - Some catalogs are bound to all workspaces (OPEN)")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Catalog(s) bound to all workspaces (OPEN): {', '.join(catalogs_open)}. Set isolation mode to ISOLATED and bind to specific workspaces only.",
+            }
+
+        print("[check_catalog_binding] PASS - No catalog is bound to all workspaces")
+        return {
+            "status": "pass",
+            "score": 2,
+            "max_score": 2,
+            "details": f"All {len(catalogs_isolated)} catalog(s) have limited workspace binding (ISOLATED).",
+        }
+
+    except Exception as e:
+        print(f"[check_catalog_binding] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking catalog binding: {str(e)}",
+        }
 
 
 def check_managed_tables_percentage():
-    """Check if managed tables/volumes > 70%."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "85% managed"}
+    """
+    Check if managed tables and volumes are more than 70% of all tables and volumes.
+
+    Iterates over all catalogs and schemas, counts tables (MANAGED, EXTERNAL; views excluded
+    from denominator) and volumes by type, and passes when (managed_tables + managed_volumes)
+    / (total_tables + total_volumes) * 100 > 70.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    MANAGED_PCT_THRESHOLD = 70.0
+    print("[check_managed_tables_percentage] Starting check...")
+
+    try:
+        print("[check_managed_tables_percentage] Getting workspace client...")
+        w = get_workspace_client()
+        if w is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": "Workspace client not available.",
+            }
+
+        managed_tables = 0
+        external_tables = 0
+        managed_volumes = 0
+        external_volumes = 0
+        list_error = None
+
+        try:
+            for catalog in w.catalogs.list():
+                catalog_name = getattr(catalog, "name", None) or ""
+                if not catalog_name:
+                    continue
+                try:
+                    for schema in w.schemas.list(catalog_name=catalog_name):
+                        schema_name = getattr(schema, "name", None) or ""
+                        if not schema_name:
+                            continue
+                        try:
+                            for table in w.tables.list(
+                                catalog_name=catalog_name,
+                                schema_name=schema_name,
+                                max_results=0,
+                            ):
+                                tt = getattr(table, "table_type", None)
+                                tt_str = (tt.value if hasattr(tt, "value") else str(tt or "")).upper()
+                                if tt_str == "MANAGED":
+                                    managed_tables += 1
+                                elif tt_str == "EXTERNAL":
+                                    external_tables += 1
+                                # VIEW, etc. excluded from denominator
+                        except Exception as e:
+                            print(f"[check_managed_tables_percentage] Error listing tables in {catalog_name}.{schema_name}: {e}")
+                        try:
+                            for volume in w.volumes.list(
+                                catalog_name=catalog_name,
+                                schema_name=schema_name,
+                                max_results=0,
+                            ):
+                                vt = getattr(volume, "volume_type", None)
+                                vt_str = (vt.value if hasattr(vt, "value") else str(vt or "")).upper()
+                                if vt_str == "MANAGED":
+                                    managed_volumes += 1
+                                elif vt_str == "EXTERNAL":
+                                    external_volumes += 1
+                        except Exception as e:
+                            print(f"[check_managed_tables_percentage] Error listing volumes in {catalog_name}.{schema_name}: {e}")
+                except Exception as e:
+                    print(f"[check_managed_tables_percentage] Error listing schemas in {catalog_name}: {e}")
+        except Exception as e:
+            print(f"[check_managed_tables_percentage] Error listing catalogs/tables/volumes: {e}")
+            list_error = e
+
+        if list_error is not None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": 2,
+                "details": f"Error listing tables/volumes: {str(list_error)}",
+            }
+
+        total_tables = managed_tables + external_tables
+        total_volumes = managed_volumes + external_volumes
+        total = total_tables + total_volumes
+        managed_total = managed_tables + managed_volumes
+
+        if total == 0:
+            print("[check_managed_tables_percentage] No tables or volumes found")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": 2,
+                "details": "No tables or volumes found in Unity Catalog; cannot compute managed percentage.",
+            }
+
+        pct = round((managed_total / total) * 100.0, 2)
+        print(f"[check_managed_tables_percentage] Tables: {managed_tables} managed, {external_tables} external; Volumes: {managed_volumes} managed, {external_volumes} external; {pct}% managed")
+
+        if pct > MANAGED_PCT_THRESHOLD:
+            print(f"[check_managed_tables_percentage] PASS - {pct}% managed (above {MANAGED_PCT_THRESHOLD}%)")
+            return {
+                "status": "pass",
+                "score": 2,
+                "max_score": 2,
+                "details": f"{pct}% of tables and volumes are managed ({managed_total}/{total}), above {MANAGED_PCT_THRESHOLD}% threshold.",
+            }
+
+        print(f"[check_managed_tables_percentage] FAIL - {pct}% managed (at or below {MANAGED_PCT_THRESHOLD}%)")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": 2,
+            "details": f"{pct}% of tables and volumes are managed ({managed_total}/{total}). Best practice: use managed tables/volumes for > {MANAGED_PCT_THRESHOLD}%.",
+        }
+
+    except Exception as e:
+        print(f"[check_managed_tables_percentage] Unexpected error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 2,
+            "details": f"Error checking managed tables percentage: {str(e)}",
+        }
 
 
 def check_no_external_storage():
