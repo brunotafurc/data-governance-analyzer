@@ -707,27 +707,225 @@ def check_no_external_storage():
 
 def check_uc_compute():
     """Check if compute is UC activated with right access mode."""
-    return {"status": "pass", "score": 3, "max_score": 3, "details": "UC enabled"}
+    UC_MODES = {
+        "DATA_SECURITY_MODE_STANDARD",
+        "DATA_SECURITY_MODE_DEDICATED",
+        "DATA_SECURITY_MODE_AUTO",
+    }
+    max_score = 3
+
+    try:
+        w = get_workspace_client()
+        for cluster in w.clusters.list():
+            name = getattr(cluster, "cluster_name", None) or (cluster.get("cluster_name") if isinstance(cluster, dict) else None) or str(getattr(cluster, "cluster_id", ""))
+            mode = getattr(cluster, "data_security_mode", None) or (cluster.get("data_security_mode") if isinstance(cluster, dict) else None)
+            mode_str = str(mode).strip() if mode else None
+            is_uc = mode_str and any(m in mode_str for m in UC_MODES)
+            if not is_uc:
+                return {"status": "fail", "score": 0, "max_score": max_score, "details": f"Cluster '{name}' is not UC enabled (data_security_mode: {mode_str or 'unknown'})."}
+        for wh in w.warehouses.list():
+            wh_id = getattr(wh, "id", None) or (wh.get("id") if isinstance(wh, dict) else None)
+            name = getattr(wh, "name", None) or getattr(wh, "warehouse_name", None) or (wh.get("name") or wh.get("warehouse_name") if isinstance(wh, dict) else None) or str(wh_id or "")
+            uc_enabled = None
+            if wh_id:
+                try:
+                    full = w.warehouses.get(id=wh_id)
+                    uc_enabled = getattr(full, "enable_unity_catalog", None)
+                    if isinstance(full, dict):
+                        uc_enabled = uc_enabled if uc_enabled is not None else full.get("enable_unity_catalog")
+                except Exception:
+                    pass
+            if uc_enabled is None:
+                uc_enabled = getattr(wh, "enable_unity_catalog", None)
+                if isinstance(wh, dict):
+                    uc_enabled = uc_enabled if uc_enabled is not None else wh.get("enable_unity_catalog")
+            if uc_enabled is not True:
+                return {"status": "fail", "score": 0, "max_score": max_score, "details": f"SQL warehouse '{name}' does not have Unity Catalog enabled."}
+        return {"status": "pass", "score": max_score, "max_score": max_score, "details": "All clusters and SQL warehouses UC compliant."}
+    except ImportError as e:
+        return {"status": "error", "score": 0, "max_score": max_score, "details": str(e)}
+    except Exception as e:
+        return {"status": "error", "score": 0, "max_score": max_score, "details": f"Error listing compute: {str(e)}"}
 
 
 def check_no_hive_data():
     """Check if no data is in hive metastore."""
-    return {"status": "pass", "score": 3, "max_score": 3, "details": "All migrated"}
+    max_score = 3
+    default_schema = "default"
+    try:
+        for db in spark.catalog.listDatabases():
+            db_name = db.name if hasattr(db, "name") else db["name"]
+            if db_name.lower() == default_schema.lower():
+                continue
+            tables = spark.catalog.listTables(db_name)
+            for t in tables:
+                tname = t.name if hasattr(t, "name") else t["name"]
+                return {
+                    "status": "fail",
+                    "score": 0,
+                    "max_score": max_score,
+                    "details": f"Hive table found in non-default schema: {db_name}.{tname}. Migrate or remove hive data."
+                }
+        return {"status": "pass", "score": max_score, "max_score": max_score, "details": "No hive data outside default schema."}
+    except Exception as e:
+        return {"status": "fail", "score": 0, "max_score": max_score, "details": f"Could not check hive metastore: {e}"}
 
 
 def check_hive_disabled():
     """Check if hive metastore is disabled."""
-    return {"status": "pass", "score": 0, "max_score": 0, "details": "Disabled"}
-
+    print("[check_hive_disabled] Starting check...")
+    try:
+        w = get_workspace_client()
+        # List catalogs; when Hive metastore is disabled, hive_metastore is not present
+        catalogs = list(w.catalogs.list())
+        catalog_names = [c.name for c in catalogs]
+        if "hive_metastore" not in catalog_names:
+            print("[check_hive_disabled] PASS - hive_metastore not visible (disabled)")
+            return {
+                "status": "pass",
+                "score": 1,
+                "max_score": 1,
+                "details": "Hive metastore is disabled"
+            }
+        print("[check_hive_disabled] FAIL - hive_metastore catalog is visible (enabled)")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": 1,
+            "details": "Hive metastore is still enabled. Disable it in workspace settings for migration completeness."
+        }
+    except ImportError as e:
+        print(f"[check_hive_disabled] ImportError: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 1,
+            "details": str(e)
+        }
+    except Exception as e:
+        print(f"[check_hive_disabled] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": 1,
+            "details": f"Error checking Hive metastore status: {str(e)}"
+        }
 
 def check_system_tables():
     """Check if all system tables are activated (70%)."""
-    return {"status": "pass", "score": 2, "max_score": 2, "details": "100% activated"}
+    SYSTEM_TABLES_PASS_THRESHOLD_PCT = 70
+    MAX_SCORE = 2
 
+    print("[check_system_tables] Starting check...")
+
+    try:
+        w = get_workspace_client()
+        metastore_summary = w.metastores.summary()
+
+        if not metastore_summary or not metastore_summary.metastore_id:
+            print("[check_system_tables] No metastore connected")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No metastore connected - cannot check system tables",
+            }
+
+        metastore_id = metastore_summary.metastore_id
+        print(f"[check_system_tables] Listing system schemas for metastore {metastore_id}...")
+
+        enabled = 0
+        total = 0
+
+        for schema_info in w.system_schemas.list(metastore_id=metastore_id):
+            total += 1
+            state = getattr(schema_info, "state", None)
+            state_str = str(state).upper() if state is not None else ""
+            if state_str == "ENABLE" or state_str == "ENABLED" or "ENABLE" in state_str:
+                enabled += 1
+
+        if total == 0:
+            print("[check_system_tables] No system schemas reported for metastore")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": "No system schemas found for metastore (cannot compute activation %)",
+            }
+
+        pct = round(100 * enabled / total, 1)
+        print(f"[check_system_tables] Enabled: {enabled}/{total} ({pct}%)")
+
+        if pct >= SYSTEM_TABLES_PASS_THRESHOLD_PCT:
+            print(f"[check_system_tables] PASS - {pct}% of system schemas activated (>= {SYSTEM_TABLES_PASS_THRESHOLD_PCT}%)")
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% activated ({enabled}/{total} system schemas)",
+            }
+
+        score = 1 if pct >= 50 else 0
+        print(f"[check_system_tables] FAIL - {pct}% activated (below {SYSTEM_TABLES_PASS_THRESHOLD_PCT}%)")
+        return {
+            "status": "fail",
+            "score": score,
+            "max_score": MAX_SCORE,
+            "details": f"{pct}% activated ({enabled}/{total} system schemas); enable more for audit/lineage/billing coverage",
+        }
+
+    except ImportError as e:
+        print(f"[check_system_tables] ImportError: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": str(e),
+        }
+    except Exception as e:
+        print(f"[check_system_tables] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking system tables: {str(e)}",
+        }
 
 def check_service_principals():
     """Check if production jobs use service principals."""
-    return {"status": "pass", "score": 1, "max_score": 1, "details": "All jobs use SPs"}
+    # Optional: only consider jobs tagged as production (set to None to check all jobs)
+    from datetime import datetime, timezone, timedelta
+
+    max_score = 1
+    try:
+        w = get_workspace_client()
+        two_weeks_ago_ms = int((datetime.now(timezone.utc) - timedelta(days=14)).timestamp() * 1000)
+        checked_job_ids = set()
+        for run in w.jobs.list_runs(completed_only=True, start_time_from=two_weeks_ago_ms):
+            jid = getattr(run, "job_id", None) or (run.get("job_id") if isinstance(run, dict) else None)
+            if jid is None or jid in checked_job_ids:
+                continue
+            checked_job_ids.add(jid)
+            try:
+                job = w.jobs.get(job_id=jid)
+            except Exception:
+                continue
+            settings = getattr(job, "settings", None) or (job.get("settings") if isinstance(job, dict) else None)
+            if not settings:
+                return {"status": "fail", "score": 0, "max_score": max_score, "details": f"Job {jid} has no settings and had recent runs. Set run_as.service_principal_name."}
+            run_as = getattr(settings, "run_as", None) or (settings.get("run_as") if isinstance(settings, dict) else None)
+            has_sp = False
+            if run_as is not None:
+                sp_name = getattr(run_as, "service_principal_name", None) or (run_as.get("service_principal_name") if isinstance(run_as, dict) else None)
+                has_sp = bool(sp_name)
+            if not has_sp:
+                jname = getattr(settings, "name", None) or (settings.get("name") if isinstance(settings, dict) else None) or str(jid)
+                return {"status": "fail", "score": 0, "max_score": max_score, "details": f"Job '{jname}' (id {jid}) has recent runs and does not use a service principal. Set run_as.service_principal_name."}
+        if not checked_job_ids:
+            return {"status": "pass", "score": max_score, "max_score": max_score, "details": "No completed job runs in last 2 weeks."}
+        return {"status": "pass", "score": max_score, "max_score": max_score, "details": "All recently active jobs use service principals."}
+    except Exception as e:
+        return {"status": "error", "score": 0, "max_score": max_score, "details": f"Error checking service principals: {e}"}
 
 
 def check_production_access():
