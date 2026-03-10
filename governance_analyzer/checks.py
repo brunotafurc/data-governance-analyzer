@@ -733,7 +733,7 @@ def check_catalog_admin_group():
 
         print("[check_catalog_admin_group] Listing catalogs...")
         try:
-            for catalog in w.catalogs.list(include_unbound=True):
+            for catalog in w.catalogs.list():
                 name = getattr(catalog, "name", None) or "unknown"
                 owner = getattr(catalog, "owner", None)
                 if owner is None:
