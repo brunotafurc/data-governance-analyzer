@@ -147,7 +147,7 @@
                   "fields": [
                     {
                       "name": "count(*)",
-                      "expression": "COUNT(`*`)"
+                      "expression": "COUNT(*)"
                     }
                   ],
                   "disaggregated": false
@@ -232,7 +232,7 @@
                   "fields": [
                     {
                       "name": "count(*)",
-                      "expression": "COUNT(`*`)"
+                      "expression": "COUNT(*)"
                     },
                     {
                       "name": "status",
@@ -291,35 +291,25 @@
                     {
                       "fieldName": "status",
                       "values": ["fail", "warning", "error"],
-                      "filterType": "FIELD_VALUE",
-                      "expression": "`status`"
+                      "filterType": "FIELD_VALUE"
                     }
                   ]
                 }
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  { "fieldName": "category", "type": "string", "displayAs": "string", "visible": true, "order": 1, "title": "Category", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "task_name", "type": "string", "displayAs": "string", "visible": true, "order": 2, "title": "Check", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "status", "type": "string", "displayAs": "string", "visible": true, "order": 3, "title": "Status", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "fraction_score", "type": "string", "displayAs": "string", "visible": true, "order": 4, "title": "Score", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "details", "type": "string", "displayAs": "string", "visible": true, "order": 5, "title": "Details", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "remediation", "type": "string", "displayAs": "string", "visible": true, "order": 6, "title": "Remediation", "alignContent": "left", "allowHTML": false }
-                ],
-                "invisibleColumns": [
-                  { "name": "score_percentage", "type": "float", "displayAs": "number", "order": 0 },
-                  { "name": "severity_order", "type": "integer", "displayAs": "number", "order": 0 }
+                  { "fieldName": "category", "displayName": "Category" },
+                  { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "status", "displayName": "Status" },
+                  { "fieldName": "fraction_score", "displayName": "Score" },
+                  { "fieldName": "details", "displayName": "Details" },
+                  { "fieldName": "remediation", "displayName": "Remediation" }
                 ]
               },
-              "allowHTMLByDefault": false,
-              "itemsPerPage": 10,
-              "paginationSize": "default",
-              "condensed": true,
-              "withRowNumber": false,
               "frame": { "title": "Top Issues & Remediation", "showTitle": true }
             }
           },
@@ -348,7 +338,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Identity"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Identity"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -388,7 +378,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Privileges"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Privileges"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -428,7 +418,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Fine-Grained Access Control"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -467,7 +457,7 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -521,32 +511,24 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  { "fieldName": "category", "type": "string", "displayAs": "string", "visible": true, "order": 1, "title": "Category", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "task_name", "type": "string", "displayAs": "string", "visible": true, "order": 2, "title": "Check", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "status", "type": "string", "displayAs": "string", "visible": true, "order": 3, "title": "Status", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "fraction_score", "type": "string", "displayAs": "string", "visible": true, "order": 4, "title": "Score", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "details", "type": "string", "displayAs": "string", "visible": true, "order": 5, "title": "Details", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "remediation", "type": "string", "displayAs": "string", "visible": true, "order": 6, "title": "Remediation", "alignContent": "left", "allowHTML": false }
-                ],
-                "invisibleColumns": [
-                  { "name": "score_percentage", "type": "float", "displayAs": "number", "order": 0 }
+                  { "fieldName": "category", "displayName": "Category" },
+                  { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "status", "displayName": "Status" },
+                  { "fieldName": "fraction_score", "displayName": "Score" },
+                  { "fieldName": "details", "displayName": "Details" },
+                  { "fieldName": "remediation", "displayName": "Remediation" }
                 ]
               },
-              "allowHTMLByDefault": false,
-              "itemsPerPage": 25,
-              "paginationSize": "default",
-              "condensed": true,
-              "withRowNumber": false,
               "frame": { "title": "Access & Security — Detailed Results", "showTitle": true }
             }
           },
@@ -575,7 +557,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Managed Storage"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -615,7 +597,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -655,7 +637,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -694,7 +676,7 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
@@ -748,32 +730,24 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
+                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE" }
                   ]
                 }
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  { "fieldName": "category", "type": "string", "displayAs": "string", "visible": true, "order": 1, "title": "Category", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "task_name", "type": "string", "displayAs": "string", "visible": true, "order": 2, "title": "Check", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "status", "type": "string", "displayAs": "string", "visible": true, "order": 3, "title": "Status", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "fraction_score", "type": "string", "displayAs": "string", "visible": true, "order": 4, "title": "Score", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "details", "type": "string", "displayAs": "string", "visible": true, "order": 5, "title": "Details", "alignContent": "left", "allowHTML": false },
-                  { "fieldName": "remediation", "type": "string", "displayAs": "string", "visible": true, "order": 6, "title": "Remediation", "alignContent": "left", "allowHTML": false }
-                ],
-                "invisibleColumns": [
-                  { "name": "score_percentage", "type": "float", "displayAs": "number", "order": 0 }
+                  { "fieldName": "category", "displayName": "Category" },
+                  { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "status", "displayName": "Status" },
+                  { "fieldName": "fraction_score", "displayName": "Score" },
+                  { "fieldName": "details", "displayName": "Details" },
+                  { "fieldName": "remediation", "displayName": "Remediation" }
                 ]
               },
-              "allowHTMLByDefault": false,
-              "itemsPerPage": 25,
-              "paginationSize": "default",
-              "condensed": true,
-              "withRowNumber": false,
               "frame": { "title": "Data Quality & Infrastructure — Detailed Results", "showTitle": true }
             }
           },
