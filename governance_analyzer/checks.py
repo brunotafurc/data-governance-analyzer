@@ -1575,3 +1575,939 @@ def check_storage_credentials():
 def check_data_quality():
     """Check if data quality is activated on 50% of tables."""
     return {"status": "pass", "score": 1, "max_score": 1, "details": "60% monitored"}
+
+
+# =============================================================================
+# Fine-Grained Access Control Checks
+# =============================================================================
+
+def check_abac_policy_adoption():
+    """
+    Check if ABAC policies are being used for centralized access control.
+
+    Queries system.access.audit for ABAC-related events (policy creation,
+    alteration, and tag application) to verify adoption.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_abac_policy_adoption] Starting check...")
+    MAX_SCORE = 3
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available to query system tables.",
+            }
+
+        query = """
+        SELECT
+            COUNT(DISTINCT CASE WHEN action_name IN ('createPolicy', 'alterPolicy') THEN action_name END) AS policy_events,
+            COUNT(DISTINCT CASE WHEN action_name IN ('applyTag', 'setTag') THEN action_name END) AS tag_events
+        FROM system.access.audit
+        WHERE event_date >= current_date() - 90
+          AND action_name IN ('createPolicy', 'alterPolicy', 'applyTag', 'setTag')
+        """
+        print("[check_abac_policy_adoption] Querying audit log for ABAC events...")
+        row = spark.sql(query).first()
+
+        policy_events = row["policy_events"] if row else 0
+        tag_events = row["tag_events"] if row else 0
+
+        if policy_events > 0 and tag_events > 0:
+            print("[check_abac_policy_adoption] PASS - ABAC policies and tags actively used")
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"ABAC policies and governed tags actively used (policy events: {policy_events}, tag events: {tag_events} in last 90 days).",
+            }
+        elif policy_events > 0 or tag_events > 0:
+            print("[check_abac_policy_adoption] WARNING - Partial ABAC adoption")
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": f"Partial ABAC adoption. Policy events: {policy_events}, tag events: {tag_events} in last 90 days. Apply governed tags and create ABAC policies for full coverage.",
+            }
+        else:
+            print("[check_abac_policy_adoption] FAIL - No ABAC activity detected")
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No ABAC policy or tag events found in last 90 days. Configure ABAC policies at the catalog level for centralized access control.",
+            }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "system.access.audit table not available. Enable audit log system tables.",
+            }
+        print(f"[check_abac_policy_adoption] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking ABAC policy adoption: {str(e)}",
+        }
+
+
+def check_governed_tags_applied():
+    """
+    Check if governed tags are applied to catalogs, schemas, and tables.
+
+    Queries information_schema to determine the percentage of schemas that
+    have at least one governed tag applied.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_governed_tags_applied] Starting check...")
+    MAX_SCORE = 2
+    PASS_THRESHOLD_PCT = 50.0
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        query = """
+        WITH all_schemas AS (
+            SELECT DISTINCT catalog_name, schema_name
+            FROM system.information_schema.schemata
+            WHERE schema_name NOT IN ('information_schema', 'default')
+              AND catalog_name NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        ),
+        tagged_schemas AS (
+            SELECT DISTINCT catalog_name, schema_name
+            FROM system.information_schema.schema_tags
+            WHERE catalog_name NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        )
+        SELECT
+            COUNT(DISTINCT a.catalog_name || '.' || a.schema_name) AS total_schemas,
+            COUNT(DISTINCT t.catalog_name || '.' || t.schema_name) AS tagged_schemas
+        FROM all_schemas a
+        LEFT JOIN tagged_schemas t
+            ON a.catalog_name = t.catalog_name AND a.schema_name = t.schema_name
+        """
+        print("[check_governed_tags_applied] Querying information_schema for tag coverage...")
+        row = spark.sql(query).first()
+
+        total = row["total_schemas"] if row else 0
+        tagged = row["tagged_schemas"] if row else 0
+
+        if total == 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": "No user schemas found to evaluate tag coverage.",
+            }
+
+        pct = round((tagged / total) * 100.0, 1)
+        print(f"[check_governed_tags_applied] {tagged}/{total} schemas tagged ({pct}%)")
+
+        if pct >= PASS_THRESHOLD_PCT:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of schemas have governed tags ({tagged}/{total}), above {PASS_THRESHOLD_PCT}% threshold.",
+            }
+        elif tagged > 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of schemas have governed tags ({tagged}/{total}). Increase tag coverage to {PASS_THRESHOLD_PCT}%.",
+            }
+        else:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": f"No governed tags applied to any of {total} schemas. Apply tags for ABAC, discoverability, and lifecycle management.",
+            }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "information_schema.schema_tags not available. Tags may not be supported in this workspace.",
+            }
+        print(f"[check_governed_tags_applied] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking governed tags: {str(e)}",
+        }
+
+
+def check_no_wildcard_grants():
+    """
+    Check for overly permissive ALL PRIVILEGES grants on catalogs and schemas.
+
+    Queries information_schema.catalog_privileges and schema_privileges for
+    ANY grants of ALL PRIVILEGES, which bypass least-privilege principles.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_no_wildcard_grants] Starting check...")
+    MAX_SCORE = 2
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        query = """
+        SELECT 'catalog' AS level, catalog_name AS object_name, grantee, privilege_type
+        FROM system.information_schema.catalog_privileges
+        WHERE privilege_type = 'ALL PRIVILEGES'
+          AND catalog_name NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        UNION ALL
+        SELECT 'schema' AS level, catalog_name || '.' || schema_name AS object_name, grantee, privilege_type
+        FROM system.information_schema.schema_privileges
+        WHERE privilege_type = 'ALL PRIVILEGES'
+          AND catalog_name NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        """
+        print("[check_no_wildcard_grants] Querying for ALL PRIVILEGES grants...")
+        df = spark.sql(query)
+        count = df.count()
+
+        if count == 0:
+            print("[check_no_wildcard_grants] PASS - No wildcard grants found")
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": "No ALL PRIVILEGES grants found on catalogs or schemas.",
+            }
+
+        rows = df.collect()
+        examples = [f"{r['level']} '{r['object_name']}' -> {r['grantee']}" for r in rows[:5]]
+        detail_str = "; ".join(examples)
+        if count > 5:
+            detail_str += f" (and {count - 5} more)"
+
+        print(f"[check_no_wildcard_grants] FAIL - {count} wildcard grant(s) found")
+        return {
+            "status": "fail",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"{count} ALL PRIVILEGES grant(s) found. Replace with specific privileges (SELECT, USE CATALOG, etc.). {detail_str}",
+        }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "information_schema privilege tables not available.",
+            }
+        print(f"[check_no_wildcard_grants] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking wildcard grants: {str(e)}",
+        }
+
+
+# =============================================================================
+# Data Quality Governance Checks
+# =============================================================================
+
+def check_anomaly_detection_enabled():
+    """
+    Check if anomaly detection (freshness/completeness) is enabled.
+
+    Queries system.data_quality_monitoring.table_results to see how many
+    schemas have active monitoring, aiming for >=30% coverage.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_anomaly_detection_enabled] Starting check...")
+    MAX_SCORE = 2
+    PASS_THRESHOLD_PCT = 30.0
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        query = """
+        WITH all_schemas AS (
+            SELECT DISTINCT catalog_name, schema_name
+            FROM system.information_schema.schemata
+            WHERE schema_name NOT IN ('information_schema', 'default')
+              AND catalog_name NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        ),
+        monitored_schemas AS (
+            SELECT DISTINCT
+                split(table_name, '\\\\.')[0] AS catalog_name,
+                split(table_name, '\\\\.')[1] AS schema_name
+            FROM system.data_quality_monitoring.table_results
+            WHERE execution_time >= current_date() - 30
+        )
+        SELECT
+            COUNT(DISTINCT a.catalog_name || '.' || a.schema_name) AS total_schemas,
+            COUNT(DISTINCT m.catalog_name || '.' || m.schema_name) AS monitored_schemas
+        FROM all_schemas a
+        LEFT JOIN monitored_schemas m
+            ON a.catalog_name = m.catalog_name AND a.schema_name = m.schema_name
+        """
+        print("[check_anomaly_detection_enabled] Querying data quality monitoring coverage...")
+        row = spark.sql(query).first()
+
+        total = row["total_schemas"] if row else 0
+        monitored = row["monitored_schemas"] if row else 0
+
+        if total == 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": "No user schemas found to evaluate anomaly detection coverage.",
+            }
+
+        pct = round((monitored / total) * 100.0, 1)
+        print(f"[check_anomaly_detection_enabled] {monitored}/{total} schemas monitored ({pct}%)")
+
+        if pct >= PASS_THRESHOLD_PCT:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of schemas have anomaly detection ({monitored}/{total}), above {PASS_THRESHOLD_PCT}% threshold.",
+            }
+        elif monitored > 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of schemas have anomaly detection ({monitored}/{total}). Enable for more schemas to reach {PASS_THRESHOLD_PCT}%.",
+            }
+        else:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": f"No anomaly detection results found across {total} schemas. Enable anomaly detection for freshness/completeness monitoring.",
+            }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "system.data_quality_monitoring.table_results not available. Enable data quality monitoring.",
+            }
+        print(f"[check_anomaly_detection_enabled] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking anomaly detection: {str(e)}",
+        }
+
+
+def check_certification_tags_used():
+    """
+    Check if tables use the system.certification_status tag (certified/deprecated).
+
+    Queries information_schema.table_tags for the certification_status tag to
+    measure adoption. Passing threshold is >30% of tables tagged.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_certification_tags_used] Starting check...")
+    MAX_SCORE = 2
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        query = """
+        WITH all_tables AS (
+            SELECT COUNT(*) AS total
+            FROM system.information_schema.tables
+            WHERE table_schema NOT IN ('information_schema', 'default')
+              AND table_catalog NOT IN ('system', 'hive_metastore', '__databricks_internal')
+              AND table_type IN ('MANAGED', 'EXTERNAL', 'VIEW')
+        ),
+        tagged_tables AS (
+            SELECT COUNT(DISTINCT catalog_name || '.' || schema_name || '.' || table_name) AS tagged
+            FROM system.information_schema.table_tags
+            WHERE tag_name = 'certification_status'
+              AND catalog_name NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        )
+        SELECT
+            a.total AS total_tables,
+            t.tagged AS tagged_tables
+        FROM all_tables a, tagged_tables t
+        """
+        print("[check_certification_tags_used] Querying certification tag coverage...")
+        row = spark.sql(query).first()
+
+        total = row["total_tables"] if row else 0
+        tagged = row["tagged_tables"] if row else 0
+
+        if total == 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": "No tables found to evaluate certification tag coverage.",
+            }
+
+        pct = round((tagged / total) * 100.0, 1)
+        print(f"[check_certification_tags_used] {tagged}/{total} tables have certification tags ({pct}%)")
+
+        if pct >= 30.0:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of tables have certification status tags ({tagged}/{total}).",
+            }
+        elif tagged > 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of tables have certification status tags ({tagged}/{total}). Tag more tables as certified or deprecated.",
+            }
+        else:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": f"No tables have certification_status tags across {total} tables. Use certified/deprecated tags to improve trust and discoverability.",
+            }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "information_schema.table_tags not available.",
+            }
+        print(f"[check_certification_tags_used] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking certification tags: {str(e)}",
+        }
+
+
+def check_sensitive_data_classification():
+    """
+    Check if sensitive data classification scanning is active.
+
+    Queries system.data_classification.results to determine if any catalogs
+    have been scanned, aiming for >=30% coverage.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_sensitive_data_classification] Starting check...")
+    MAX_SCORE = 2
+    PASS_THRESHOLD_PCT = 30.0
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        query = """
+        WITH all_catalogs AS (
+            SELECT DISTINCT catalog_name
+            FROM system.information_schema.schemata
+            WHERE catalog_name NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        ),
+        scanned_catalogs AS (
+            SELECT DISTINCT split(table_name, '\\\\.')[0] AS catalog_name
+            FROM system.data_classification.results
+        )
+        SELECT
+            COUNT(DISTINCT a.catalog_name) AS total_catalogs,
+            COUNT(DISTINCT s.catalog_name) AS scanned_catalogs
+        FROM all_catalogs a
+        LEFT JOIN scanned_catalogs s ON a.catalog_name = s.catalog_name
+        """
+        print("[check_sensitive_data_classification] Querying data classification results...")
+        row = spark.sql(query).first()
+
+        total = row["total_catalogs"] if row else 0
+        scanned = row["scanned_catalogs"] if row else 0
+
+        if total == 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": "No user catalogs found to evaluate classification coverage.",
+            }
+
+        pct = round((scanned / total) * 100.0, 1)
+        print(f"[check_sensitive_data_classification] {scanned}/{total} catalogs scanned ({pct}%)")
+
+        if pct >= PASS_THRESHOLD_PCT:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of catalogs have data classification results ({scanned}/{total}), above {PASS_THRESHOLD_PCT}% threshold.",
+            }
+        elif scanned > 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% of catalogs have data classification results ({scanned}/{total}). Enable scanning on more catalogs.",
+            }
+        else:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": f"No data classification results found across {total} catalogs. Enable sensitive data scanning to detect PII and financial data.",
+            }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "system.data_classification.results not available. Enable data classification.",
+            }
+        print(f"[check_sensitive_data_classification] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking data classification: {str(e)}",
+        }
+
+
+# =============================================================================
+# Lineage & Discoverability Checks
+# =============================================================================
+
+def check_orphan_tables():
+    """
+    Check for orphan tables with no lineage activity in the last 90 days.
+
+    Uses a pure SQL approach joining information_schema.tables with
+    system.access.table_lineage to avoid slow SDK iteration. Tables with
+    no reads or writes in 90 days are flagged as orphans.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_orphan_tables] Starting check...")
+    MAX_SCORE = 2
+    ORPHAN_THRESHOLD_PCT = 10.0
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        query = """
+        WITH all_tables AS (
+            SELECT table_catalog || '.' || table_schema || '.' || table_name AS full_name
+            FROM system.information_schema.tables
+            WHERE table_schema NOT IN ('information_schema', 'default')
+              AND table_catalog NOT IN ('system', 'hive_metastore', '__databricks_internal')
+              AND table_type IN ('MANAGED', 'EXTERNAL')
+        ),
+        active_tables AS (
+            SELECT DISTINCT target_table_full_name AS full_name
+            FROM system.access.table_lineage
+            WHERE event_date >= current_date() - 90
+            UNION
+            SELECT DISTINCT source_table_full_name
+            FROM system.access.table_lineage
+            WHERE event_date >= current_date() - 90
+        )
+        SELECT
+            COUNT(*) AS total_tables,
+            COUNT(a.full_name) AS active_tables,
+            COUNT(*) - COUNT(a.full_name) AS orphan_tables
+        FROM all_tables t
+        LEFT JOIN active_tables a ON t.full_name = a.full_name
+        """
+        print("[check_orphan_tables] Querying lineage for orphan tables...")
+        row = spark.sql(query).first()
+
+        total = row["total_tables"] if row else 0
+        orphans = row["orphan_tables"] if row else 0
+        active = row["active_tables"] if row else 0
+
+        if total == 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": "No tables found to evaluate orphan status.",
+            }
+
+        pct = round((orphans / total) * 100.0, 1)
+        print(f"[check_orphan_tables] {orphans}/{total} orphan tables ({pct}%), {active} active")
+
+        if pct < ORPHAN_THRESHOLD_PCT:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% orphan tables ({orphans}/{total}), below {ORPHAN_THRESHOLD_PCT}% threshold. {active} tables active in last 90 days.",
+            }
+        else:
+            score = 1 if pct < 30.0 else 0
+            return {
+                "status": "fail",
+                "score": score,
+                "max_score": MAX_SCORE,
+                "details": f"{pct}% orphan tables ({orphans}/{total}) with no lineage in 90 days. Consider deprecating or cleaning up unused tables.",
+            }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "system.access.table_lineage or information_schema.tables not available.",
+            }
+        print(f"[check_orphan_tables] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking orphan tables: {str(e)}",
+        }
+
+
+def check_table_column_comments():
+    """
+    Check the coverage of table and column comments/descriptions.
+
+    Well-documented tables and columns improve discoverability, governance,
+    and trust. Passing requires >=70% of tables and >=50% of columns with comments.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_table_column_comments] Starting check...")
+    MAX_SCORE = 2
+    TABLE_COMMENT_THRESHOLD = 70.0
+    COLUMN_COMMENT_THRESHOLD = 50.0
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        table_query = """
+        SELECT
+            COUNT(*) AS total_tables,
+            SUM(CASE WHEN comment IS NOT NULL AND comment != '' THEN 1 ELSE 0 END) AS commented_tables
+        FROM system.information_schema.tables
+        WHERE table_schema NOT IN ('information_schema', 'default')
+          AND table_catalog NOT IN ('system', 'hive_metastore', '__databricks_internal')
+          AND table_type IN ('MANAGED', 'EXTERNAL', 'VIEW')
+        """
+
+        col_query = """
+        SELECT
+            COUNT(*) AS total_columns,
+            SUM(CASE WHEN comment IS NOT NULL AND comment != '' THEN 1 ELSE 0 END) AS commented_columns
+        FROM system.information_schema.columns
+        WHERE table_schema NOT IN ('information_schema', 'default')
+          AND table_catalog NOT IN ('system', 'hive_metastore', '__databricks_internal')
+        """
+
+        print("[check_table_column_comments] Querying table and column comment coverage...")
+        t_row = spark.sql(table_query).first()
+        c_row = spark.sql(col_query).first()
+
+        total_tables = t_row["total_tables"] if t_row else 0
+        commented_tables = t_row["commented_tables"] if t_row else 0
+        total_columns = c_row["total_columns"] if c_row else 0
+        commented_columns = c_row["commented_columns"] if c_row else 0
+
+        if total_tables == 0:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": "No tables found to evaluate comment coverage.",
+            }
+
+        table_pct = round((commented_tables / total_tables) * 100.0, 1) if total_tables > 0 else 0
+        col_pct = round((commented_columns / total_columns) * 100.0, 1) if total_columns > 0 else 0
+
+        print(f"[check_table_column_comments] Tables: {table_pct}% commented, Columns: {col_pct}% commented")
+
+        if table_pct >= TABLE_COMMENT_THRESHOLD and col_pct >= COLUMN_COMMENT_THRESHOLD:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"Tables: {table_pct}% commented ({commented_tables}/{total_tables}), Columns: {col_pct}% commented ({commented_columns}/{total_columns}).",
+            }
+        elif table_pct >= TABLE_COMMENT_THRESHOLD or col_pct >= COLUMN_COMMENT_THRESHOLD:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": f"Partial comment coverage. Tables: {table_pct}% ({commented_tables}/{total_tables}), Columns: {col_pct}% ({commented_columns}/{total_columns}). Improve to {TABLE_COMMENT_THRESHOLD}% tables / {COLUMN_COMMENT_THRESHOLD}% columns.",
+            }
+        else:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": f"Low comment coverage. Tables: {table_pct}% ({commented_tables}/{total_tables}), Columns: {col_pct}% ({commented_columns}/{total_columns}). Add descriptions for discoverability.",
+            }
+
+    except Exception as e:
+        print(f"[check_table_column_comments] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking comment coverage: {str(e)}",
+        }
+
+
+# =============================================================================
+# AI & Model Governance Checks
+# =============================================================================
+
+def check_models_in_uc():
+    """
+    Check if ML models are registered in Unity Catalog vs legacy workspace registry.
+
+    UC registration ensures governance, lineage, and cross-workspace access.
+    Passes when all models are in UC and none in the legacy registry.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_models_in_uc] Starting check...")
+    MAX_SCORE = 2
+
+    try:
+        w = get_workspace_client()
+        if w is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "Workspace client not available.",
+            }
+
+        uc_model_count = 0
+        legacy_model_count = 0
+
+        print("[check_models_in_uc] Counting UC registered models...")
+        try:
+            for _ in w.registered_models.list(max_results=1000):
+                uc_model_count += 1
+        except Exception as e:
+            print(f"[check_models_in_uc] Error listing UC models: {e}")
+
+        print("[check_models_in_uc] Counting legacy workspace models...")
+        try:
+            if hasattr(w, 'model_registry'):
+                for _ in w.model_registry.list_models():
+                    legacy_model_count += 1
+        except Exception as e:
+            print(f"[check_models_in_uc] Legacy registry not available or empty: {e}")
+
+        total = uc_model_count + legacy_model_count
+        print(f"[check_models_in_uc] UC models: {uc_model_count}, Legacy models: {legacy_model_count}")
+
+        if total == 0:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": "No ML models found in either registry. No migration needed.",
+            }
+
+        if legacy_model_count == 0:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"All {uc_model_count} model(s) registered in Unity Catalog. No legacy models.",
+            }
+
+        pct_uc = round((uc_model_count / total) * 100.0, 1)
+        return {
+            "status": "fail",
+            "score": 1 if pct_uc > 50 else 0,
+            "max_score": MAX_SCORE,
+            "details": f"{legacy_model_count} model(s) still in legacy workspace registry. {uc_model_count} in UC ({pct_uc}%). Migrate legacy models to Unity Catalog.",
+        }
+
+    except Exception as e:
+        print(f"[check_models_in_uc] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking model registry: {str(e)}",
+        }
+
+
+def check_mlflow_experiment_tracking():
+    """
+    Check if MLflow experiments are tracked in UC-managed MLflow.
+
+    Queries system.mlflow.experiments_latest to confirm experiments exist
+    and are actively recording runs in the last 30 days.
+
+    Returns:
+        dict: Status with score, max_score, and details
+    """
+    print("[check_mlflow_experiment_tracking] Starting check...")
+    MAX_SCORE = 2
+
+    try:
+        from pyspark.sql import SparkSession
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No active Spark session available.",
+            }
+
+        query = """
+        SELECT
+            COUNT(*) AS total_experiments,
+            SUM(CASE WHEN last_update_time >= current_timestamp() - INTERVAL 30 DAYS THEN 1 ELSE 0 END) AS active_experiments
+        FROM system.mlflow.experiments_latest
+        WHERE lifecycle_stage = 'active'
+        """
+        print("[check_mlflow_experiment_tracking] Querying MLflow experiments...")
+        row = spark.sql(query).first()
+
+        total = row["total_experiments"] if row else 0
+        active = row["active_experiments"] if row else 0
+
+        if total == 0:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "No MLflow experiments found. Set up UC-managed MLflow experiment tracking.",
+            }
+
+        if active > 0:
+            return {
+                "status": "pass",
+                "score": MAX_SCORE,
+                "max_score": MAX_SCORE,
+                "details": f"{active} active experiment(s) with runs in last 30 days ({total} total experiments tracked).",
+            }
+        else:
+            return {
+                "status": "warning",
+                "score": 1,
+                "max_score": MAX_SCORE,
+                "details": f"{total} experiment(s) exist but none had runs in the last 30 days. Verify teams are actively using MLflow tracking.",
+            }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "table_or_view_not_found" in error_msg or "table not found" in error_msg:
+            return {
+                "status": "error",
+                "score": 0,
+                "max_score": MAX_SCORE,
+                "details": "system.mlflow.experiments_latest not available. Enable MLflow system tables.",
+            }
+        print(f"[check_mlflow_experiment_tracking] Error: {e}")
+        return {
+            "status": "error",
+            "score": 0,
+            "max_score": MAX_SCORE,
+            "details": f"Error checking MLflow experiments: {str(e)}",
+        }
