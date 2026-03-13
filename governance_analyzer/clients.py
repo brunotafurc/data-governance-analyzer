@@ -56,12 +56,38 @@ def get_workspace_client():
         raise ImportError("Databricks SDK not available. Please install: pip install databricks-sdk")
 
 
+def _detect_account_host():
+    """
+    Detect the correct account console URL based on the workspace cloud provider.
+
+    Returns:
+        str: The account console URL for the detected cloud (AWS, Azure, or GCP).
+    """
+    _ACCOUNT_HOSTS = {
+        "azure": "https://accounts.azuredatabricks.net",
+        "gcp": "https://accounts.gcp.databricks.com",
+        "aws": "https://accounts.cloud.databricks.com",
+    }
+    try:
+        from databricks.sdk import WorkspaceClient
+        host = WorkspaceClient().config.host or ""
+        if ".azuredatabricks.net" in host:
+            return _ACCOUNT_HOSTS["azure"]
+        if ".gcp.databricks.com" in host:
+            return _ACCOUNT_HOSTS["gcp"]
+    except Exception:
+        pass
+    return _ACCOUNT_HOSTS["aws"]
+
+
 def get_account_client():
     """
     Get AccountClient with error handling.
     
     Uses credentials from configure_account_auth() or environment variables.
     Returns None if account credentials are not configured.
+    Automatically detects the correct account host (AWS/Azure/GCP) from
+    the workspace URL.
     
     Returns:
         AccountClient or None: Initialized account client or None if not configured
@@ -72,7 +98,6 @@ def get_account_client():
     try:
         from databricks.sdk import AccountClient
         
-        # Check module config first, then environment variables
         account_id = _account_config["account_id"] or os.environ.get("DATABRICKS_ACCOUNT_ID")
         client_id = _account_config["client_id"] or os.environ.get("DATABRICKS_CLIENT_ID")
         client_secret = _account_config["client_secret"] or os.environ.get("DATABRICKS_CLIENT_SECRET")
@@ -80,16 +105,15 @@ def get_account_client():
         if not account_id:
             return None
         
-        # Build AccountClient with explicit credentials if provided
         if client_id and client_secret:
+            account_host = _detect_account_host()
             return AccountClient(
-                host=f"https://accounts.cloud.databricks.com",
+                host=account_host,
                 account_id=account_id,
                 client_id=client_id,
                 client_secret=client_secret
             )
         else:
-            # Fall back to default authentication (e.g., from environment or config file)
             return AccountClient(account_id=account_id)
             
     except ImportError:

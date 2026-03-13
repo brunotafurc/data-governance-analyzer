@@ -458,14 +458,15 @@ def check_metastore_admin_group():
                     "details": f"Could not determine metastore owner for '{metastore_name}'"
                 }
             
-            # Handle special system owner - this is fine
-            if metastore_owner.lower() == "system user":
-                print("[check_metastore_admin_group] Owner is 'System user' - system-managed metastore (OK)")
+            # Handle special built-in owners
+            _BUILTIN_GROUP_OWNERS = {"system user", "account users"}
+            if metastore_owner.lower() in _BUILTIN_GROUP_OWNERS:
+                print(f"[check_metastore_admin_group] Owner is '{metastore_owner}' - built-in group (OK)")
                 return {
                     "status": "pass",
                     "score": 2,
                     "max_score": 2,
-                    "details": f"Metastore '{metastore_name}' is managed by 'System user' (Databricks-managed)"
+                    "details": f"Metastore '{metastore_name}' is owned by built-in group '{metastore_owner}'"
                 }
             
             # Determine owner type using SCIM filters (single API calls, no iteration)
@@ -2462,9 +2463,9 @@ def check_mlflow_experiment_tracking():
         query = """
         SELECT
             COUNT(*) AS total_experiments,
-            SUM(CASE WHEN last_update_time >= current_timestamp() - INTERVAL 30 DAYS THEN 1 ELSE 0 END) AS active_experiments
+            SUM(CASE WHEN update_time >= current_timestamp() - INTERVAL 30 DAYS THEN 1 ELSE 0 END) AS active_experiments
         FROM system.mlflow.experiments_latest
-        WHERE lifecycle_stage = 'active'
+        WHERE delete_time IS NULL
         """
         print("[check_mlflow_experiment_tracking] Querying MLflow experiments...")
         row = spark.sql(query).first()
