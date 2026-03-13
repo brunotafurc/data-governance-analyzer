@@ -47,3 +47,4 @@ from .checks import (
 )
 
 from .dashboard import create_dashboard
+from .registry import GOVERNANCE_CHECKS
