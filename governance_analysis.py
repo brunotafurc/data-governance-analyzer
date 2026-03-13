@@ -48,84 +48,87 @@ if account_id:
         client_secret=client_secret
     )
 
-# Remediation guidance for each check (shown when status is not 'pass')
-REMEDIATION_GUIDE = {
-    "Connect a Metastore to your Workspace": "Assign a Unity Catalog metastore to this workspace in Account Console > Workspaces. See: https://docs.databricks.com/data-governance/unity-catalog/get-started",
-    "The workspace is in the same region as the metastore": "Deploy workspace and metastore in the same cloud region for performance and compliance. See: https://docs.databricks.com/data-governance/unity-catalog/",
-    "Use SCIM or AIM from an Identity Provider": "Enable SCIM provisioning in Account Console > Settings > User provisioning to sync identities from your IdP (Azure AD, Okta, etc.). See: https://docs.databricks.com/admin/users-groups/scim/",
-    "Account Admin role is assigned to a group": "Create an admin group and assign the account_admin role to it instead of individual users. See: https://docs.databricks.com/admin/users-groups/",
-    "Metastore Admin role is assigned to a group or to System User": "Transfer metastore ownership to a group in Unity Catalog settings. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/admin-privileges",
-    "Workspace Admin role is assigned to a group": "Add an account-level group to the workspace admins group. See: https://docs.databricks.com/admin/users-groups/",
-    "Catalog Admin role is assigned to a group": "Transfer catalog ownership to groups using ALTER CATALOG ... SET OWNER TO. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/ownership",
-    "At least 1 user is an account admin": "Assign the account_admin role to at least one user or group in Account Console > User management. See: https://docs.databricks.com/admin/users-groups/",
-    "Less than 5% of users are Account Admin": "Reduce the number of account admins. Use groups for role-based access instead. See: https://docs.databricks.com/admin/users-groups/best-practices",
-    "Create multiple Catalogs based on environment/BU/team": "Create separate catalogs for dev/staging/prod or per business unit. See: https://docs.databricks.com/catalogs/",
-    "No Catalog is bound to all workspaces": "Set catalog isolation mode to ISOLATED and bind to specific workspaces. See: https://docs.databricks.com/catalogs/binding",
-    "Use Managed tables and volumes > 70%": "Convert external tables to managed tables where possible for better governance. See: https://docs.databricks.com/tables/managed",
-    "No ADLS or S3 buckets outside UC": "Migrate external storage to Unity Catalog managed storage or register as external locations. See: https://docs.databricks.com/connect/",
-    "No external volumes/tables at external location root": "Move external tables/volumes to subdirectories under external locations. See: https://docs.databricks.com/connect/",
-    "Independent storage credentials per external location": "Create separate storage credentials for each external location for isolation. See: https://docs.databricks.com/connect/",
-    "Compute is UC activated with right access mode": "Set data_security_mode to USER_ISOLATION or SINGLE_USER on all clusters. Enable UC on SQL warehouses. See: https://docs.databricks.com/compute/configure",
-    "No data in hive metastore": "Migrate Hive metastore tables to Unity Catalog. See: https://docs.databricks.com/data-governance/unity-catalog/migrate",
-    "Hive metastore is disabled": "Disable the legacy Hive metastore in workspace settings after migrating all data. See: https://docs.databricks.com/data-governance/unity-catalog/migrate",
-    "0 mount storage accounts to DBFS": "Remove DBFS mounts and use Unity Catalog volumes or external locations instead. See: https://docs.databricks.com/volumes/",
-    "All system tables activated (70%)": "Enable more system table schemas in Unity Catalog for audit, billing, and lineage coverage. See: https://docs.databricks.com/admin/system-tables/",
-    "70% of managed tables have predictive optimization": "Enable predictive optimization on managed tables for automated maintenance. See: https://docs.databricks.com/optimizations/predictive-optimization",
-    "Data quality activated on 50% of tables": "Enable data quality monitoring (anomaly detection) on more tables. See: https://docs.databricks.com/data-governance/unity-catalog/data-quality-monitoring/",
-    "Production jobs use service principals": "Configure jobs with run_as.service_principal_name for production workloads. See: https://docs.databricks.com/admin/users-groups/service-principals",
-    "Modify access to production is limited": "Restrict MODIFY/WRITE privileges on production schemas to service principals only. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/",
-    "70% of assets have groups as owners": "Transfer asset ownership to groups using ALTER ... SET OWNER TO. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/ownership",
-    "ABAC policies actively used for centralized access control": "Configure ABAC policies at the catalog level. See: https://docs.databricks.com/data-governance/unity-catalog/abac/",
-    "Governed tags applied to schemas and tables": "Apply governed tags to classify data assets for ABAC, discoverability, and lifecycle management. See: https://docs.databricks.com/admin/governed-tags/",
-    "No ALL PRIVILEGES wildcard grants on catalogs or schemas": "Replace ALL PRIVILEGES with specific grants (SELECT, USE CATALOG, USE SCHEMA). See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/",
-    "Anomaly detection enabled for freshness and completeness": "Enable anomaly detection at the schema level for automatic freshness/completeness monitoring. See: https://docs.databricks.com/data-governance/unity-catalog/data-quality-monitoring/anomaly-detection/",
-    "Certification status tags used on tables": "Tag production tables as 'certified' and legacy tables as 'deprecated'. See: https://docs.databricks.com/data-governance/unity-catalog/certify-deprecate-data",
-    "Sensitive data classification scanning active": "Enable sensitive data classification to automatically detect PII and financial data. See: https://docs.databricks.com/admin/system-tables/data-classification",
-    "Less than 10% orphan tables (no lineage in 90 days)": "Review and deprecate/drop unused tables. Tag unused tables as deprecated. See: https://docs.databricks.com/data-governance/unity-catalog/certify-deprecate-data",
-    "Table and column comments coverage": "Add descriptions to tables with COMMENT ON TABLE and to columns with ALTER TABLE ... ALTER COLUMN ... COMMENT. See: https://docs.databricks.com/sql/language-manual/sql-ref-syntax-ddl-comment",
-    "ML models registered in Unity Catalog": "Migrate models from the workspace registry to Unity Catalog. See: https://docs.databricks.com/machine-learning/manage-model-lifecycle/",
-    "MLflow experiment tracking active in UC": "Configure MLflow experiments to use Unity Catalog for tracking. See: https://docs.databricks.com/mlflow3/genai",
-}
-
-# COMMAND ----------
-
-# Define governance checks
+# Define governance checks: (category, task_name, check_func, remediation_text)
 checks = [
-    ("Metastore setup", "Connect a Metastore to your Workspace", ga.check_metastore_connected),
-    ("Metastore setup", "The workspace is in the same region as the metastore", ga.check_metastore_region),
-    ("Identity", "Use SCIM or AIM from an Identity Provider", ga.check_scim_aim_provisioning),
-    ("Identity", "Account Admin role is assigned to a group", ga.check_account_admin_group),
-    ("Identity", "Metastore Admin role is assigned to a group or to System User", ga.check_metastore_admin_group),
-    ("Identity", "Workspace Admin role is assigned to a group", ga.check_workspace_admin_group),
-    ("Identity", "Catalog Admin role is assigned to a group", ga.check_catalog_admin_group),
-    ("Identity", "At least 1 user is an account admin", ga.check_at_least_one_account_admin),
-    ("Identity", "Less than 5% of users are Account Admin", ga.check_account_admin_percentage),
-    ("Managed Storage", "Create multiple Catalogs based on environment/BU/team", ga.check_multiple_catalogs),
-    ("Managed Storage", "No Catalog is bound to all workspaces", ga.check_catalog_binding),
-    ("Managed Storage", "Use Managed tables and volumes > 70%", ga.check_managed_tables_percentage),
-    ("Managed Storage", "No ADLS or S3 buckets outside UC", ga.check_no_external_storage),
-    ("Managed Storage", "No external volumes/tables at external location root", ga.check_external_location_root),
-    ("Managed Storage", "Independent storage credentials per external location", ga.check_storage_credentials),
-    ("Compute/Cluster Policy", "Compute is UC activated with right access mode", ga.check_uc_compute),
-    ("Migration Completeness", "No data in hive metastore", ga.check_no_hive_data),
-    ("Migration Completeness", "Hive metastore is disabled", ga.check_hive_disabled),
-    ("Migration Completeness", "0 mount storage accounts to DBFS", ga.check_no_dbfs_mounts),
-    ("Audit & Lineage Coverage", "All system tables activated (70%)", ga.check_system_tables),
-    ("Audit & Lineage Coverage", "70% of managed tables have predictive optimization", ga.check_predictive_optimization),
-    ("Audit & Lineage Coverage", "Data quality activated on 50% of tables", ga.check_data_quality),
-    ("Privileges", "Production jobs use service principals", ga.check_service_principals),
-    ("Privileges", "Modify access to production is limited", ga.check_production_access),
-    ("Privileges", "70% of assets have groups as owners", ga.check_group_ownership),
-    ("Fine-Grained Access Control", "ABAC policies actively used for centralized access control", ga.check_abac_policy_adoption),
-    ("Fine-Grained Access Control", "Governed tags applied to schemas and tables", ga.check_governed_tags_applied),
-    ("Fine-Grained Access Control", "No ALL PRIVILEGES wildcard grants on catalogs or schemas", ga.check_no_wildcard_grants),
-    ("Data Quality Governance", "Anomaly detection enabled for freshness and completeness", ga.check_anomaly_detection_enabled),
-    ("Data Quality Governance", "Certification status tags used on tables", ga.check_certification_tags_used),
-    ("Data Quality Governance", "Sensitive data classification scanning active", ga.check_sensitive_data_classification),
-    ("Lineage & Discoverability", "Less than 10% orphan tables (no lineage in 90 days)", ga.check_orphan_tables),
-    ("Lineage & Discoverability", "Table and column comments coverage", ga.check_table_column_comments),
-    ("AI & Model Governance", "ML models registered in Unity Catalog", ga.check_models_in_uc),
-    ("AI & Model Governance", "MLflow experiment tracking active in UC", ga.check_mlflow_experiment_tracking),
+    # Platform Setup (Metastore + Compute + Migration)
+    ("Platform Setup", "Connect a Metastore to your Workspace", ga.check_metastore_connected,
+     "Assign a Unity Catalog metastore to this workspace in Account Console > Workspaces. See: https://docs.databricks.com/data-governance/unity-catalog/get-started"),
+    ("Platform Setup", "The workspace is in the same region as the metastore", ga.check_metastore_region,
+     "Deploy workspace and metastore in the same cloud region for performance and compliance. See: https://docs.databricks.com/data-governance/unity-catalog/"),
+    ("Platform Setup", "Compute is UC activated with right access mode", ga.check_uc_compute,
+     "Set data_security_mode to USER_ISOLATION or SINGLE_USER on all clusters. Enable UC on SQL warehouses. See: https://docs.databricks.com/compute/configure"),
+    ("Platform Setup", "No data in hive metastore", ga.check_no_hive_data,
+     "Migrate Hive metastore tables to Unity Catalog. See: https://docs.databricks.com/data-governance/unity-catalog/migrate"),
+    ("Platform Setup", "Hive metastore is disabled", ga.check_hive_disabled,
+     "Disable the legacy Hive metastore in workspace settings after migrating all data. See: https://docs.databricks.com/data-governance/unity-catalog/migrate"),
+    ("Platform Setup", "0 mount storage accounts to DBFS", ga.check_no_dbfs_mounts,
+     "Remove DBFS mounts and use Unity Catalog volumes or external locations instead. See: https://docs.databricks.com/volumes/"),
+
+    # Identity & Access (Identity + Privileges + Fine-Grained Access Control)
+    ("Identity & Access", "Use SCIM or AIM from an Identity Provider", ga.check_scim_aim_provisioning,
+     "Enable SCIM provisioning in Account Console > Settings > User provisioning to sync identities from your IdP (Azure AD, Okta, etc.). See: https://docs.databricks.com/admin/users-groups/scim/"),
+    ("Identity & Access", "Account Admin role is assigned to a group", ga.check_account_admin_group,
+     "Create an admin group and assign the account_admin role to it instead of individual users. See: https://docs.databricks.com/admin/users-groups/"),
+    ("Identity & Access", "Metastore Admin role is assigned to a group or to System User", ga.check_metastore_admin_group,
+     "Transfer metastore ownership to a group in Unity Catalog settings. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/admin-privileges"),
+    ("Identity & Access", "Workspace Admin role is assigned to a group", ga.check_workspace_admin_group,
+     "Add an account-level group to the workspace admins group. See: https://docs.databricks.com/admin/users-groups/"),
+    ("Identity & Access", "Catalog Admin role is assigned to a group", ga.check_catalog_admin_group,
+     "Transfer catalog ownership to groups using ALTER CATALOG ... SET OWNER TO. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/ownership"),
+    ("Identity & Access", "At least 1 user is an account admin", ga.check_at_least_one_account_admin,
+     "Assign the account_admin role to at least one user or group in Account Console > User management. See: https://docs.databricks.com/admin/users-groups/"),
+    ("Identity & Access", "Less than 5% of users are Account Admin", ga.check_account_admin_percentage,
+     "Reduce the number of account admins. Use groups for role-based access instead. See: https://docs.databricks.com/admin/users-groups/best-practices"),
+    ("Identity & Access", "Production jobs use service principals", ga.check_service_principals,
+     "Configure jobs with run_as.service_principal_name for production workloads. See: https://docs.databricks.com/admin/users-groups/service-principals"),
+    ("Identity & Access", "Modify access to production is limited", ga.check_production_access,
+     "Restrict MODIFY/WRITE privileges on production schemas to service principals only. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/"),
+    ("Identity & Access", "70% of assets have groups as owners", ga.check_group_ownership,
+     "Transfer asset ownership to groups using ALTER ... SET OWNER TO. See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/ownership"),
+    ("Identity & Access", "ABAC policies actively used for centralized access control", ga.check_abac_policy_adoption,
+     "Configure ABAC policies at the catalog level. See: https://docs.databricks.com/data-governance/unity-catalog/abac/"),
+    ("Identity & Access", "Governed tags applied to schemas and tables", ga.check_governed_tags_applied,
+     "Apply governed tags to classify data assets for ABAC, discoverability, and lifecycle management. See: https://docs.databricks.com/admin/governed-tags/"),
+    ("Identity & Access", "No ALL PRIVILEGES wildcard grants on catalogs or schemas", ga.check_no_wildcard_grants,
+     "Replace ALL PRIVILEGES with specific grants (SELECT, USE CATALOG, USE SCHEMA). See: https://docs.databricks.com/data-governance/unity-catalog/manage-privileges/"),
+
+    # Data Protection (Managed Storage + Data Quality Governance)
+    ("Data Protection", "Create multiple Catalogs based on environment/BU/team", ga.check_multiple_catalogs,
+     "Create separate catalogs for dev/staging/prod or per business unit. See: https://docs.databricks.com/catalogs/"),
+    ("Data Protection", "No Catalog is bound to all workspaces", ga.check_catalog_binding,
+     "Set catalog isolation mode to ISOLATED and bind to specific workspaces. See: https://docs.databricks.com/catalogs/binding"),
+    ("Data Protection", "Use Managed tables and volumes > 70%", ga.check_managed_tables_percentage,
+     "Convert external tables to managed tables where possible for better governance. See: https://docs.databricks.com/tables/managed"),
+    ("Data Protection", "No ADLS or S3 buckets outside UC", ga.check_no_external_storage,
+     "Migrate external storage to Unity Catalog managed storage or register as external locations. See: https://docs.databricks.com/connect/"),
+    ("Data Protection", "No external volumes/tables at external location root", ga.check_external_location_root,
+     "Move external tables/volumes to subdirectories under external locations. See: https://docs.databricks.com/connect/"),
+    ("Data Protection", "Independent storage credentials per external location", ga.check_storage_credentials,
+     "Create separate storage credentials for each external location for isolation. See: https://docs.databricks.com/connect/"),
+    ("Data Protection", "Anomaly detection enabled for freshness and completeness", ga.check_anomaly_detection_enabled,
+     "Enable anomaly detection at the schema level for automatic freshness/completeness monitoring. See: https://docs.databricks.com/data-governance/unity-catalog/data-quality-monitoring/anomaly-detection/"),
+    ("Data Protection", "Certification status tags used on tables", ga.check_certification_tags_used,
+     "Tag production tables as 'certified' and legacy tables as 'deprecated'. See: https://docs.databricks.com/data-governance/unity-catalog/certify-deprecate-data"),
+    ("Data Protection", "Sensitive data classification scanning active", ga.check_sensitive_data_classification,
+     "Enable sensitive data classification to automatically detect PII and financial data. See: https://docs.databricks.com/admin/system-tables/data-classification"),
+
+    # Data Quality & Observability (Audit & Lineage Coverage + Lineage & Discoverability)
+    ("Data Quality & Observability", "All system tables activated (70%)", ga.check_system_tables,
+     "Enable more system table schemas in Unity Catalog for audit, billing, and lineage coverage. See: https://docs.databricks.com/admin/system-tables/"),
+    ("Data Quality & Observability", "70% of managed tables have predictive optimization", ga.check_predictive_optimization,
+     "Enable predictive optimization on managed tables for automated maintenance. See: https://docs.databricks.com/optimizations/predictive-optimization"),
+    ("Data Quality & Observability", "Data quality activated on 50% of tables", ga.check_data_quality,
+     "Enable data quality monitoring (anomaly detection) on more tables. See: https://docs.databricks.com/data-governance/unity-catalog/data-quality-monitoring/"),
+    ("Data Quality & Observability", "Less than 10% orphan tables (no lineage in 90 days)", ga.check_orphan_tables,
+     "Review and deprecate/drop unused tables. Tag unused tables as deprecated. See: https://docs.databricks.com/data-governance/unity-catalog/certify-deprecate-data"),
+    ("Data Quality & Observability", "Table and column comments coverage", ga.check_table_column_comments,
+     "Add descriptions to tables with COMMENT ON TABLE and to columns with ALTER TABLE ... ALTER COLUMN ... COMMENT. See: https://docs.databricks.com/sql/language-manual/sql-ref-syntax-ddl-comment"),
+
+    # AI & Model Governance
+    ("AI & Model Governance", "ML models registered in Unity Catalog", ga.check_models_in_uc,
+     "Migrate models from the workspace registry to Unity Catalog. See: https://docs.databricks.com/machine-learning/manage-model-lifecycle/"),
+    ("AI & Model Governance", "MLflow experiment tracking active in UC", ga.check_mlflow_experiment_tracking,
+     "Configure MLflow experiments to use Unity Catalog for tracking. See: https://docs.databricks.com/mlflow3/genai"),
 ]
 
 # COMMAND ----------
@@ -134,15 +137,13 @@ checks = [
 results = []
 timestamp = datetime.now()
 
-for category, task_name, check_func in checks:
+for category, task_name, check_func, remediation_text in checks:
     result = check_func()
     max_score = result["max_score"]
     score = result["score"]
     score_percentage = round((score / max_score * 100.0) if max_score > 0 else 0.0, 2)
     
-    remediation = ""
-    if result["status"] != "pass":
-        remediation = result.get("remediation") or REMEDIATION_GUIDE.get(task_name, "")
+    remediation = remediation_text if result["status"] != "pass" else ""
 
     results.append({
         "timestamp": timestamp,

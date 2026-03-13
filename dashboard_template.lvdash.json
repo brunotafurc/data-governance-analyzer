@@ -4,7 +4,7 @@
       "name": "governance_results",
       "displayName": "Governance Results",
       "queryLines": [
-        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {catalog}.{schema}.governance_results"
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results"
       ],
       "columns": [
         {
@@ -28,21 +28,21 @@
       "name": "governance_results_issues",
       "displayName": "Governance Issues",
       "queryLines": [
-        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {catalog}.{schema}.governance_results WHERE status IN ('fail', 'warning', 'error')"
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results WHERE status IN ('fail', 'warning', 'error')"
       ]
     },
     {
       "name": "access_security_results",
-      "displayName": "Access & Security Results",
+      "displayName": "Identity & Access Results",
       "queryLines": [
-        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {catalog}.{schema}.governance_results WHERE category IN ('Identity', 'Privileges', 'Fine-Grained Access Control')"
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results WHERE category IN ('Identity & Access')"
       ]
     },
     {
       "name": "data_quality_results",
       "displayName": "Data Quality & Infrastructure Results",
       "queryLines": [
-        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {catalog}.{schema}.governance_results WHERE category IN ('Managed Storage', 'Audit & Lineage Coverage', 'Data Quality Governance', 'Lineage & Discoverability', 'Metastore setup', 'Compute/Cluster Policy', 'Migration Completeness', 'AI & Model Governance')"
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results WHERE category IN ('Data Protection', 'Platform Setup', 'Data Quality & Observability', 'AI & Model Governance')"
       ]
     }
   ],
@@ -298,14 +298,11 @@
                 "query": {
                   "datasetName": "governance_results_issues",
                   "fields": [
-                    { "name": "category", "expression": "`category`" },
                     { "name": "task_name", "expression": "`task_name`" },
+                    { "name": "category", "expression": "`category`" },
                     { "name": "status", "expression": "`status`" },
-                    { "name": "fraction_score", "expression": "`fraction_score`" },
-                    { "name": "score_percentage", "expression": "`score_percentage`" },
                     { "name": "details", "expression": "`details`" },
-                    { "name": "remediation", "expression": "`remediation`" },
-                    { "name": "severity_order", "expression": "`severity_order`" }
+                    { "name": "remediation", "expression": "`remediation`" }
                   ],
                   "disaggregated": true
                 }
@@ -316,10 +313,9 @@
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  { "fieldName": "category", "displayName": "Category" },
                   { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "category", "displayName": "Category" },
                   { "fieldName": "status", "displayName": "Status" },
-                  { "fieldName": "fraction_score", "displayName": "Score" },
                   { "fieldName": "details", "displayName": "Details" },
                   { "fieldName": "remediation", "displayName": "Remediation" }
                 ]
@@ -334,11 +330,11 @@
     },
     {
       "name": "access_security",
-      "displayName": "Access & Security",
+      "displayName": "Identity & Access",
       "layout": [
         {
           "widget": {
-            "name": "identity_score",
+            "name": "access_score",
             "queries": [
               {
                 "name": "main_query",
@@ -365,17 +361,17 @@
                     "decimalPlaces": { "type": "exact", "places": 1 },
                     "abbreviation": "none"
                   },
-                  "displayName": "Identity Score %"
+                  "displayName": "Identity & Access Score %"
                 }
               },
-              "frame": { "title": "Identity Score", "showTitle": true }
+              "frame": { "title": "Identity & Access Score", "showTitle": true }
             }
           },
-          "position": { "x": 0, "y": 0, "width": 2, "height": 3 }
+          "position": { "x": 0, "y": 0, "width": 3, "height": 3 }
         },
         {
           "widget": {
-            "name": "privileges_score",
+            "name": "access_check_count",
             "queries": [
               {
                 "name": "main_query",
@@ -383,8 +379,8 @@
                   "datasetName": "access_security_results",
                   "fields": [
                     {
-                      "name": "avg(score_percentage)",
-                      "expression": "AVG(`score_percentage`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(*)"
                     }
                   ],
                   "disaggregated": false
@@ -396,56 +392,19 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "avg(score_percentage)",
+                  "fieldName": "count(*)",
                   "format": {
                     "type": "number-plain",
-                    "decimalPlaces": { "type": "exact", "places": 1 },
+                    "decimalPlaces": { "type": "exact", "places": 0 },
                     "abbreviation": "none"
                   },
-                  "displayName": "Privileges Score %"
+                  "displayName": "Total Checks"
                 }
               },
-              "frame": { "title": "Privileges Score", "showTitle": true }
+              "frame": { "title": "Total Checks", "showTitle": true }
             }
           },
-          "position": { "x": 2, "y": 0, "width": 2, "height": 3 }
-        },
-        {
-          "widget": {
-            "name": "fgac_score",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "access_security_results",
-                  "fields": [
-                    {
-                      "name": "avg(score_percentage)",
-                      "expression": "AVG(`score_percentage`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "avg(score_percentage)",
-                  "format": {
-                    "type": "number-plain",
-                    "decimalPlaces": { "type": "exact", "places": 1 },
-                    "abbreviation": "none"
-                  },
-                  "displayName": "Fine-Grained Access %"
-                }
-              },
-              "frame": { "title": "Fine-Grained Access Score", "showTitle": true }
-            }
-          },
-          "position": { "x": 4, "y": 0, "width": 2, "height": 3 }
+          "position": { "x": 3, "y": 0, "width": 3, "height": 3 }
         },
         {
           "widget": {
@@ -503,11 +462,8 @@
                 "query": {
                   "datasetName": "access_security_results",
                   "fields": [
-                    { "name": "category", "expression": "`category`" },
                     { "name": "task_name", "expression": "`task_name`" },
                     { "name": "status", "expression": "`status`" },
-                    { "name": "fraction_score", "expression": "`fraction_score`" },
-                    { "name": "score_percentage", "expression": "`score_percentage`" },
                     { "name": "details", "expression": "`details`" },
                     { "name": "remediation", "expression": "`remediation`" }
                   ],
@@ -520,15 +476,13 @@
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  { "fieldName": "category", "displayName": "Category" },
                   { "fieldName": "task_name", "displayName": "Check" },
                   { "fieldName": "status", "displayName": "Status" },
-                  { "fieldName": "fraction_score", "displayName": "Score" },
                   { "fieldName": "details", "displayName": "Details" },
                   { "fieldName": "remediation", "displayName": "Remediation" }
                 ]
               },
-              "frame": { "title": "Access & Security — Detailed Results", "showTitle": true }
+              "frame": { "title": "Identity & Access — Detailed Results", "showTitle": true }
             }
           },
           "position": { "x": 0, "y": 10, "width": 6, "height": 8 }
@@ -542,7 +496,7 @@
       "layout": [
         {
           "widget": {
-            "name": "storage_score",
+            "name": "dq_infra_score",
             "queries": [
               {
                 "name": "main_query",
@@ -569,17 +523,17 @@
                     "decimalPlaces": { "type": "exact", "places": 1 },
                     "abbreviation": "none"
                   },
-                  "displayName": "Storage Score %"
+                  "displayName": "Overall Score %"
                 }
               },
-              "frame": { "title": "Managed Storage Score", "showTitle": true }
+              "frame": { "title": "Data Quality & Infrastructure Score", "showTitle": true }
             }
           },
-          "position": { "x": 0, "y": 0, "width": 2, "height": 3 }
+          "position": { "x": 0, "y": 0, "width": 3, "height": 3 }
         },
         {
           "widget": {
-            "name": "quality_score",
+            "name": "dq_infra_check_count",
             "queries": [
               {
                 "name": "main_query",
@@ -587,8 +541,8 @@
                   "datasetName": "data_quality_results",
                   "fields": [
                     {
-                      "name": "avg(score_percentage)",
-                      "expression": "AVG(`score_percentage`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(*)"
                     }
                   ],
                   "disaggregated": false
@@ -600,56 +554,19 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "avg(score_percentage)",
+                  "fieldName": "count(*)",
                   "format": {
                     "type": "number-plain",
-                    "decimalPlaces": { "type": "exact", "places": 1 },
+                    "decimalPlaces": { "type": "exact", "places": 0 },
                     "abbreviation": "none"
                   },
-                  "displayName": "Quality Score %"
+                  "displayName": "Total Checks"
                 }
               },
-              "frame": { "title": "Quality & Observability Score", "showTitle": true }
+              "frame": { "title": "Total Checks", "showTitle": true }
             }
           },
-          "position": { "x": 2, "y": 0, "width": 2, "height": 3 }
-        },
-        {
-          "widget": {
-            "name": "infra_score",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "data_quality_results",
-                  "fields": [
-                    {
-                      "name": "avg(score_percentage)",
-                      "expression": "AVG(`score_percentage`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "avg(score_percentage)",
-                  "format": {
-                    "type": "number-plain",
-                    "decimalPlaces": { "type": "exact", "places": 1 },
-                    "abbreviation": "none"
-                  },
-                  "displayName": "Infrastructure Score %"
-                }
-              },
-              "frame": { "title": "Infrastructure Score", "showTitle": true }
-            }
-          },
-          "position": { "x": 4, "y": 0, "width": 2, "height": 3 }
+          "position": { "x": 3, "y": 0, "width": 3, "height": 3 }
         },
         {
           "widget": {
@@ -707,11 +624,9 @@
                 "query": {
                   "datasetName": "data_quality_results",
                   "fields": [
-                    { "name": "category", "expression": "`category`" },
                     { "name": "task_name", "expression": "`task_name`" },
+                    { "name": "category", "expression": "`category`" },
                     { "name": "status", "expression": "`status`" },
-                    { "name": "fraction_score", "expression": "`fraction_score`" },
-                    { "name": "score_percentage", "expression": "`score_percentage`" },
                     { "name": "details", "expression": "`details`" },
                     { "name": "remediation", "expression": "`remediation`" }
                   ],
@@ -724,10 +639,9 @@
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  { "fieldName": "category", "displayName": "Category" },
                   { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "category", "displayName": "Category" },
                   { "fieldName": "status", "displayName": "Status" },
-                  { "fieldName": "fraction_score", "displayName": "Score" },
                   { "fieldName": "details", "displayName": "Details" },
                   { "fieldName": "remediation", "displayName": "Remediation" }
                 ]
