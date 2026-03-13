@@ -39,11 +39,13 @@ def create_dashboard(catalog_name, schema_name, folder_path="/Shared/Governance"
     with open(template_path, 'r') as f:
         dashboard_spec = json.load(f)
     
-    # Update the query to use the correct catalog and schema
+    # Update all dataset queries to use the correct catalog and schema
     full_table_name = f"{catalog_name}.{schema_name}.governance_results"
-    dashboard_spec["datasets"][0]["queryLines"] = [
-        f"SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {full_table_name}"
-    ]
+    for dataset in dashboard_spec["datasets"]:
+        dataset["queryLines"] = [
+            line.replace("{catalog}.{schema}.governance_results", full_table_name)
+            for line in dataset["queryLines"]
+        ]
     
     try:
         print("Initializing Databricks SDK...")

@@ -23,6 +23,27 @@
           "expression": "CASE WHEN AVG(score_percentage) >= 95 THEN 'Leading' WHEN AVG(score_percentage) >= 80 THEN 'Advanced' WHEN AVG(score_percentage) >= 60 THEN 'Established' WHEN AVG(score_percentage) >= 40 THEN 'Developing' ELSE 'Foundational' END"
         }
       ]
+    },
+    {
+      "name": "governance_results_issues",
+      "displayName": "Governance Issues",
+      "queryLines": [
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {catalog}.{schema}.governance_results WHERE status IN ('fail', 'warning', 'error')"
+      ]
+    },
+    {
+      "name": "access_security_results",
+      "displayName": "Access & Security Results",
+      "queryLines": [
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {catalog}.{schema}.governance_results WHERE category IN ('Identity', 'Privileges', 'Fine-Grained Access Control')"
+      ]
+    },
+    {
+      "name": "data_quality_results",
+      "displayName": "Data Quality & Infrastructure Results",
+      "queryLines": [
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score, CASE WHEN status = 'fail' THEN 1 WHEN status = 'warning' THEN 2 WHEN status = 'error' THEN 3 ELSE 4 END AS severity_order FROM {catalog}.{schema}.governance_results WHERE category IN ('Managed Storage', 'Audit & Lineage Coverage', 'Data Quality Governance', 'Lineage & Discoverability', 'Metastore setup', 'Compute/Cluster Policy', 'Migration Completeness', 'AI & Model Governance')"
+      ]
     }
   ],
   "pages": [
@@ -275,7 +296,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "governance_results_issues",
                   "fields": [
                     { "name": "category", "expression": "`category`" },
                     { "name": "task_name", "expression": "`task_name`" },
@@ -286,15 +307,7 @@
                     { "name": "remediation", "expression": "`remediation`" },
                     { "name": "severity_order", "expression": "`severity_order`" }
                   ],
-                  "disaggregated": true,
-                  "filters": [
-                    {
-                      "fieldName": "status",
-                      "values": ["fail", "warning", "error"],
-                      "filterType": "FIELD_VALUE",
-                      "expression": "`status`"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -330,17 +343,14 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "access_security_results",
                   "fields": [
                     {
                       "name": "avg(score_percentage)",
                       "expression": "AVG(`score_percentage`)"
                     }
                   ],
-                  "disaggregated": false,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Identity"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": false
                 }
               }
             ],
@@ -370,17 +380,14 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "access_security_results",
                   "fields": [
                     {
                       "name": "avg(score_percentage)",
                       "expression": "AVG(`score_percentage`)"
                     }
                   ],
-                  "disaggregated": false,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Privileges"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": false
                 }
               }
             ],
@@ -410,17 +417,14 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "access_security_results",
                   "fields": [
                     {
                       "name": "avg(score_percentage)",
                       "expression": "AVG(`score_percentage`)"
                     }
                   ],
-                  "disaggregated": false,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": false
                 }
               }
             ],
@@ -450,16 +454,13 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "access_security_results",
                   "fields": [
                     { "name": "task_name", "expression": "`task_name`" },
                     { "name": "score_percentage", "expression": "`score_percentage`" },
                     { "name": "status", "expression": "`status`" }
                   ],
-                  "disaggregated": true,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -500,7 +501,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "access_security_results",
                   "fields": [
                     { "name": "category", "expression": "`category`" },
                     { "name": "task_name", "expression": "`task_name`" },
@@ -510,10 +511,7 @@
                     { "name": "details", "expression": "`details`" },
                     { "name": "remediation", "expression": "`remediation`" }
                   ],
-                  "disaggregated": true,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -549,17 +547,14 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "data_quality_results",
                   "fields": [
                     {
                       "name": "avg(score_percentage)",
                       "expression": "AVG(`score_percentage`)"
                     }
                   ],
-                  "disaggregated": false,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": false
                 }
               }
             ],
@@ -589,17 +584,14 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "data_quality_results",
                   "fields": [
                     {
                       "name": "avg(score_percentage)",
                       "expression": "AVG(`score_percentage`)"
                     }
                   ],
-                  "disaggregated": false,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": false
                 }
               }
             ],
@@ -629,17 +621,14 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "data_quality_results",
                   "fields": [
                     {
                       "name": "avg(score_percentage)",
                       "expression": "AVG(`score_percentage`)"
                     }
                   ],
-                  "disaggregated": false,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": false
                 }
               }
             ],
@@ -669,16 +658,13 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "data_quality_results",
                   "fields": [
                     { "name": "task_name", "expression": "`task_name`" },
                     { "name": "score_percentage", "expression": "`score_percentage`" },
                     { "name": "status", "expression": "`status`" }
                   ],
-                  "disaggregated": true,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -719,7 +705,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "governance_results",
+                  "datasetName": "data_quality_results",
                   "fields": [
                     { "name": "category", "expression": "`category`" },
                     { "name": "task_name", "expression": "`task_name`" },
@@ -729,10 +715,7 @@
                     { "name": "details", "expression": "`details`" },
                     { "name": "remediation", "expression": "`remediation`" }
                   ],
-                  "disaggregated": true,
-                  "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
