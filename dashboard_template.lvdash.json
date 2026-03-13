@@ -291,7 +291,8 @@
                     {
                       "fieldName": "status",
                       "values": ["fail", "warning", "error"],
-                      "filterType": "FIELD_VALUE"
+                      "filterType": "FIELD_VALUE",
+                      "expression": "`status`"
                     }
                   ]
                 }
@@ -338,7 +339,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Identity"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Identity"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -378,7 +379,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Privileges"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Privileges"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -418,7 +419,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Fine-Grained Access Control"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -457,7 +458,7 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -511,7 +512,7 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Identity", "Privileges", "Fine-Grained Access Control"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -557,7 +558,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Managed Storage"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -597,7 +598,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -637,7 +638,7 @@
                   ],
                   "disaggregated": false,
                   "filters": [
-                    { "fieldName": "category", "values": ["Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -676,7 +677,7 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
@@ -730,7 +731,7 @@
                   ],
                   "disaggregated": true,
                   "filters": [
-                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE" }
+                    { "fieldName": "category", "values": ["Managed Storage", "Audit & Lineage Coverage", "Data Quality Governance", "Lineage & Discoverability", "Metastore setup", "Compute/Cluster Policy", "Migration Completeness", "AI & Model Governance"], "filterType": "FIELD_VALUE", "expression": "`category`" }
                   ]
                 }
               }
