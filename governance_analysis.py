@@ -48,36 +48,7 @@ if account_id:
         client_secret=client_secret
     )
 
-# COMMAND ----------
-
-# Define governance checks
-checks = [
-    ("Metastore setup", "Connect a Metastore to your Workspace", ga.check_metastore_connected),
-    ("Metastore setup", "The workspace is in the same region as the metastore", ga.check_metastore_region),
-    ("Identity", "Use SCIM or AIM from an Identity Provider", ga.check_scim_aim_provisioning),
-    ("Identity", "Account Admin role is assigned to a group", ga.check_account_admin_group),
-    ("Identity", "Metastore Admin role is assigned to a group or to System User", ga.check_metastore_admin_group),
-    ("Identity", "Workspace Admin role is assigned to a group", ga.check_workspace_admin_group),
-    ("Identity", "Catalog Admin role is assigned to a group", ga.check_catalog_admin_group),
-    ("Identity", "At least 1 user is an account admin", ga.check_at_least_one_account_admin),
-    ("Identity", "Less than 5% of users are Account Admin", ga.check_account_admin_percentage),
-    ("Managed Storage", "Create multiple Catalogs based on environment/BU/team", ga.check_multiple_catalogs),
-    ("Managed Storage", "No Catalog is bound to all workspaces", ga.check_catalog_binding),
-    ("Managed Storage", "Use Managed tables and volumes > 70%", ga.check_managed_tables_percentage),
-    ("Managed Storage", "No ADLS or S3 buckets outside UC", ga.check_no_external_storage),
-    ("Managed Storage", "No external volumes/tables at external location root", ga.check_external_location_root),
-    ("Managed Storage", "Independent storage credentials per external location", ga.check_storage_credentials),
-    ("Compute/Cluster Policy", "Compute is UC activated with right access mode", ga.check_uc_compute),
-    ("Migration Completeness", "No data in hive metastore", ga.check_no_hive_data),
-    ("Migration Completeness", "Hive metastore is disabled", ga.check_hive_disabled),
-    ("Migration Completeness", "0 mount storage accounts to DBFS", ga.check_no_dbfs_mounts),
-    ("Audit & Lineage Coverage", "All system tables activated (70%)", ga.check_system_tables),
-    ("Audit & Lineage Coverage", "70% of managed tables have predictive optimization", ga.check_predictive_optimization),
-    ("Audit & Lineage Coverage", "Data quality activated on 50% of tables", ga.check_data_quality),
-    ("Privileges", "Production jobs use service principals", ga.check_service_principals),
-    ("Privileges", "Modify access to production is limited", ga.check_production_access),
-    ("Privileges", "70% of assets have groups as owners", ga.check_group_ownership),
-]
+checks = ga.GOVERNANCE_CHECKS
 
 # COMMAND ----------
 
@@ -85,12 +56,14 @@ checks = [
 results = []
 timestamp = datetime.now()
 
-for category, task_name, check_func in checks:
+for category, task_name, check_func, remediation_text in checks:
     result = check_func()
     max_score = result["max_score"]
     score = result["score"]
     score_percentage = round((score / max_score * 100.0) if max_score > 0 else 0.0, 2)
     
+    remediation = remediation_text if result["status"] != "pass" else ""
+
     results.append({
         "timestamp": timestamp,
         "category": category,
@@ -99,7 +72,8 @@ for category, task_name, check_func in checks:
         "score": score,
         "max_score": max_score,
         "score_percentage": float(score_percentage),
-        "details": result["details"]
+        "details": result["details"],
+        "remediation": remediation,
     })
 
 print(f"Completed {len(results)} governance checks")

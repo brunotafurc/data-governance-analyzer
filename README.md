@@ -43,6 +43,7 @@ The notebook automatically deploys a Lakeview Dashboard to `/Shared/Governance/`
 - **Status Distribution**: Pie chart showing pass/fail distribution
 - **Detailed Results Table**: Full governance check results
 
+
 ### Manual Import
 
 If automatic dashboard creation fails, you can manually import:

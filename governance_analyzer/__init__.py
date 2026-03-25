@@ -34,6 +34,17 @@ from .checks import (
     check_external_location_root,
     check_storage_credentials,
     check_data_quality,
+    check_abac_policy_adoption,
+    check_governed_tags_applied,
+    check_no_wildcard_grants,
+    check_anomaly_detection_enabled,
+    check_certification_tags_used,
+    check_sensitive_data_classification,
+    check_orphan_tables,
+    check_table_column_comments,
+    check_models_in_uc,
+    check_mlflow_experiment_tracking,
 )
 
 from .dashboard import create_dashboard
+from .registry import GOVERNANCE_CHECKS

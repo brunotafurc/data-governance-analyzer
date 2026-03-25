@@ -1,37 +1,68 @@
 {
   "datasets": [
     {
-      "name": "81cfba21",
+      "name": "governance_results",
       "displayName": "Governance Results",
       "queryLines": [
-        "SELECT category, details, score, status, task_name, timestamp, max_score, score_percentage, concat(score,'/',max_score) as fraction_score  FROM {catalog}.{schema}.governance_results"
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results"
       ],
       "columns": [
         {
           "displayName": "Pass Rate",
           "description": "Percentage of checks that passed",
           "expression": "SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)"
+        },
+        {
+          "displayName": "Maturity Score",
+          "description": "Overall governance maturity score (0-100)",
+          "expression": "ROUND(AVG(score_percentage), 1)"
+        },
+        {
+          "displayName": "Maturity Level",
+          "description": "Governance maturity tier",
+          "expression": "CASE WHEN AVG(score_percentage) >= 95 THEN 'Leading' WHEN AVG(score_percentage) >= 80 THEN 'Advanced' WHEN AVG(score_percentage) >= 60 THEN 'Established' WHEN AVG(score_percentage) >= 40 THEN 'Developing' ELSE 'Foundational' END"
         }
+      ]
+    },
+    {
+      "name": "governance_results_issues",
+      "displayName": "Governance Issues",
+      "queryLines": [
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results WHERE status IN ('fail', 'warning', 'error')"
+      ]
+    },
+    {
+      "name": "access_security_results",
+      "displayName": "Identity & Access Results",
+      "queryLines": [
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results WHERE category IN ('Identity & Access')"
+      ]
+    },
+    {
+      "name": "data_quality_results",
+      "displayName": "Data Quality & Infrastructure Results",
+      "queryLines": [
+        "SELECT category, details, remediation, score, status, task_name, timestamp, max_score, score_percentage FROM {catalog}.{schema}.governance_results WHERE category IN ('Data Protection', 'Platform Setup', 'Data Quality & Observability', 'AI & Model Governance')"
       ]
     }
   ],
   "pages": [
     {
-      "name": "b35e8fff",
-      "displayName": "Summary",
+      "name": "executive_summary",
+      "displayName": "Executive Summary",
       "layout": [
         {
           "widget": {
-            "name": "total_checks_counter",
+            "name": "maturity_score",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "81cfba21",
+                  "datasetName": "governance_results",
                   "fields": [
                     {
-                      "name": "count(*)",
-                      "expression": "COUNT(`*`)"
+                      "name": "measure(Maturity Score)",
+                      "expression": "MEASURE(`Maturity Score`)"
                     }
                   ],
                   "disaggregated": false
@@ -43,43 +74,32 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "count(*)",
+                  "fieldName": "measure(Maturity Score)",
                   "format": {
                     "type": "number-plain",
-                    "decimalPlaces": {
-                      "type": "exact",
-                      "places": 0
-                    },
+                    "decimalPlaces": { "type": "exact", "places": 1 },
                     "abbreviation": "none"
                   },
-                  "displayName": "Total Checks"
+                  "displayName": "Maturity Score"
                 }
               },
-              "frame": {
-                "title": "Total Checks",
-                "showTitle": true
-              }
+              "frame": { "title": "Governance Maturity Score", "showTitle": true }
             }
           },
-          "position": {
-            "x": 0,
-            "y": 0,
-            "width": 2,
-            "height": 3
-          }
+          "position": { "x": 0, "y": 0, "width": 2, "height": 3 }
         },
         {
           "widget": {
-            "name": "avg_score_counter",
+            "name": "maturity_level",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "81cfba21",
+                  "datasetName": "governance_results",
                   "fields": [
                     {
-                      "name": "sum(score)",
-                      "expression": "SUM(`score`)"
+                      "name": "measure(Maturity Level)",
+                      "expression": "MEASURE(`Maturity Level`)"
                     }
                   ],
                   "disaggregated": false
@@ -91,39 +111,23 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "sum(score)",
-                  "format": {
-                    "type": "number-plain",
-                    "decimalPlaces": {
-                      "type": "exact",
-                      "places": 1
-                    },
-                    "abbreviation": "none"
-                  },
-                  "displayName": "Avg Score"
+                  "fieldName": "measure(Maturity Level)",
+                  "displayName": "Maturity Level"
                 }
               },
-              "frame": {
-                "title": "Total Score",
-                "showTitle": true
-              }
+              "frame": { "title": "Maturity Level", "showTitle": true }
             }
           },
-          "position": {
-            "x": 2,
-            "y": 0,
-            "width": 2,
-            "height": 3
-          }
+          "position": { "x": 2, "y": 0, "width": 1, "height": 3 }
         },
         {
           "widget": {
-            "name": "pass_rate_counter",
+            "name": "pass_rate",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "81cfba21",
+                  "datasetName": "governance_results",
                   "fields": [
                     {
                       "name": "measure(Pass Rate)",
@@ -142,48 +146,70 @@
                   "fieldName": "measure(Pass Rate)",
                   "format": {
                     "type": "number-plain",
-                    "abbreviation": "compact",
-                    "decimalPlaces": {
-                      "type": "exact",
-                      "places": 1
-                    }
+                    "decimalPlaces": { "type": "exact", "places": 1 },
+                    "abbreviation": "none"
                   },
-                  "displayName": "Pass Rate"
+                  "displayName": "Pass Rate %"
                 }
               },
-              "frame": {
-                "title": "Pass Rate",
-                "showTitle": true
-              }
+              "frame": { "title": "Pass Rate", "showTitle": true }
             }
           },
-          "position": {
-            "x": 4,
-            "y": 0,
-            "width": 2,
-            "height": 3
-          }
+          "position": { "x": 3, "y": 0, "width": 2, "height": 3 }
         },
         {
           "widget": {
-            "name": "score_by_category",
+            "name": "total_checks",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "81cfba21",
+                  "datasetName": "governance_results",
                   "fields": [
                     {
-                      "name": "avg(score)",
-                      "expression": "AVG(`score`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(*)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": { "type": "exact", "places": 0 },
+                    "abbreviation": "none"
+                  },
+                  "displayName": "Total Checks"
+                }
+              },
+              "frame": { "title": "Total Checks", "showTitle": true }
+            }
+          },
+          "position": { "x": 5, "y": 0, "width": 1, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "category_scores",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "governance_results",
+                  "fields": [
+                    {
+                      "name": "avg(score_percentage)",
+                      "expression": "AVG(`score_percentage`)"
                     },
                     {
                       "name": "category",
                       "expression": "`category`"
-                    },
-                    {
-                      "name": "avg(score_percentage)",
-                      "expression": "AVG(`score_percentage`)"
                     }
                   ],
                   "disaggregated": false
@@ -195,47 +221,26 @@
               "widgetType": "bar",
               "encodings": {
                 "x": {
-                  "fieldName": "category",
-                  "displayName": "Category",
-                  "scale": {
-                    "type": "categorical"
-                  }
-                },
-                "y": {
                   "fieldName": "avg(score_percentage)",
                   "format": {
                     "type": "number-plain",
-                    "decimalPlaces": {
-                      "type": "exact",
-                      "places": 1
-                    },
+                    "decimalPlaces": { "type": "exact", "places": 0 },
                     "abbreviation": "none"
                   },
-                  "displayName": "Avg Score",
-                  "scale": {
-                    "type": "quantitative"
-                  }
+                  "displayName": "Avg Score %",
+                  "scale": { "type": "quantitative" }
                 },
-                "color": {
-                  "fieldName": "avg(score)",
-                  "displayName": "Avg Score",
-                  "scale": {
-                    "type": "quantitative"
-                  }
+                "y": {
+                  "fieldName": "category",
+                  "displayName": "Category",
+                  "scale": { "type": "categorical" },
+                  "sort": { "by": "x", "direction": "asc" }
                 }
               },
-              "frame": {
-                "title": "Average Score by Category",
-                "showTitle": true
-              }
+              "frame": { "title": "Score by Category", "showTitle": true }
             }
           },
-          "position": {
-            "x": 0,
-            "y": 3,
-            "width": 3,
-            "height": 6
-          }
+          "position": { "x": 0, "y": 3, "width": 3, "height": 7 }
         },
         {
           "widget": {
@@ -244,11 +249,11 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "81cfba21",
+                  "datasetName": "governance_results",
                   "fields": [
                     {
                       "name": "count(*)",
-                      "expression": "COUNT(`*`)"
+                      "expression": "COUNT(*)"
                     },
                     {
                       "name": "status",
@@ -265,15 +270,10 @@
               "encodings": {
                 "angle": {
                   "fieldName": "count(*)",
-                  "scale": {
-                    "type": "quantitative"
-                  },
+                  "scale": { "type": "quantitative" },
                   "format": {
                     "type": "number-plain",
-                    "decimalPlaces": {
-                      "type": "exact",
-                      "places": 0
-                    },
+                    "decimalPlaces": { "type": "exact", "places": 0 },
                     "abbreviation": "none"
                   },
                   "displayName": "Count"
@@ -281,328 +281,375 @@
                 "color": {
                   "fieldName": "status",
                   "displayName": "Status",
-                  "scale": {
-                    "type": "categorical"
-                  }
+                  "scale": { "type": "categorical" }
                 }
               },
-              "frame": {
-                "title": "Status Distribution",
-                "showTitle": true
-              }
+              "frame": { "title": "Status Distribution", "showTitle": true }
             }
           },
-          "position": {
-            "x": 3,
-            "y": 3,
-            "width": 3,
-            "height": 6
-          }
+          "position": { "x": 3, "y": 3, "width": 3, "height": 7 }
         },
         {
           "widget": {
-            "name": "detailed_results_table",
+            "name": "top_issues_remediation",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "81cfba21",
+                  "datasetName": "governance_results_issues",
                   "fields": [
-                    {
-                      "name": "category",
-                      "expression": "`category`"
-                    },
-                    {
-                      "name": "task_name",
-                      "expression": "`task_name`"
-                    },
-                    {
-                      "name": "details",
-                      "expression": "`details`"
-                    },
-                    {
-                      "name": "status",
-                      "expression": "`status`"
-                    },
-                    {
-                      "name": "fraction_score",
-                      "expression": "`fraction_score`"
-                    },
-                    {
-                      "name": "score_percentage",
-                      "expression": "`score_percentage`"
-                    },
-                    {
-                      "name": "timestamp",
-                      "expression": "`timestamp`"
-                    }
+                    { "name": "task_name", "expression": "`task_name`" },
+                    { "name": "category", "expression": "`category`" },
+                    { "name": "status", "expression": "`status`" },
+                    { "name": "details", "expression": "`details`" },
+                    { "name": "remediation", "expression": "`remediation`" }
                   ],
                   "disaggregated": true
                 }
               }
             ],
             "spec": {
-              "version": 1,
+              "version": 2,
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  {
-                    "fieldName": "category",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 1,
-                    "title": "Category",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "task_name",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 2,
-                    "title": "Task Name",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "details",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 3,
-                    "title": "Details",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "status",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 4,
-                    "title": "Status",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "fraction_score",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 6,
-                    "title": "fraction_score",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "score_percentage",
-                    "numberFormat": "0.00",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "float",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 7,
-                    "title": "score_percentage",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "timestamp",
-                    "dateTimeFormat": "DD/MM/YYYY ",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "datetime",
-                    "displayAs": "datetime",
-                    "visible": true,
-                    "order": 8,
-                    "title": "Timestamp",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  }
+                  { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "category", "displayName": "Category" },
+                  { "fieldName": "status", "displayName": "Status" },
+                  { "fieldName": "details", "displayName": "Details" },
+                  { "fieldName": "remediation", "displayName": "Remediation" }
                 ]
               },
-              "invisibleColumns": [
-                {
-                  "numberFormat": "0",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "max_score",
-                  "type": "integer",
-                  "displayAs": "number",
-                  "order": 0,
-                  "title": "max_score",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "numberFormat": "0",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "score",
-                  "type": "integer",
-                  "displayAs": "number",
-                  "order": 5,
-                  "title": "Score",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                }
-              ],
-              "allowHTMLByDefault": false,
-              "itemsPerPage": 25,
-              "paginationSize": "default",
-              "condensed": true,
-              "withRowNumber": false,
-              "frame": {
-                "title": "Detailed Results",
-                "showTitle": true
-              }
+              "frame": { "title": "Top Issues & Remediation", "showTitle": true }
             }
           },
-          "position": {
-            "x": 0,
-            "y": 9,
-            "width": 6,
-            "height": 8
-          }
+          "position": { "x": 0, "y": 10, "width": 6, "height": 8 }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "access_security",
+      "displayName": "Identity & Access",
+      "layout": [
+        {
+          "widget": {
+            "name": "access_score",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "access_security_results",
+                  "fields": [
+                    {
+                      "name": "avg(score_percentage)",
+                      "expression": "AVG(`score_percentage`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(score_percentage)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": { "type": "exact", "places": 1 },
+                    "abbreviation": "none"
+                  },
+                  "displayName": "Identity & Access Score %"
+                }
+              },
+              "frame": { "title": "Identity & Access Score", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 0, "width": 3, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "access_check_count",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "access_security_results",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(*)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": { "type": "exact", "places": 0 },
+                    "abbreviation": "none"
+                  },
+                  "displayName": "Total Checks"
+                }
+              },
+              "frame": { "title": "Total Checks", "showTitle": true }
+            }
+          },
+          "position": { "x": 3, "y": 0, "width": 3, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "access_check_breakdown",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "access_security_results",
+                  "fields": [
+                    { "name": "task_name", "expression": "`task_name`" },
+                    { "name": "score_percentage", "expression": "`score_percentage`" },
+                    { "name": "status", "expression": "`status`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "score_percentage",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": { "type": "exact", "places": 0 },
+                    "abbreviation": "none"
+                  },
+                  "displayName": "Score %",
+                  "scale": { "type": "quantitative" }
+                },
+                "y": {
+                  "fieldName": "task_name",
+                  "displayName": "Check",
+                  "scale": { "type": "categorical" }
+                },
+                "color": {
+                  "fieldName": "status",
+                  "displayName": "Status",
+                  "scale": { "type": "categorical" }
+                }
+              },
+              "frame": { "title": "Check Breakdown", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 3, "width": 6, "height": 7 }
+        },
+        {
+          "widget": {
+            "name": "access_detail_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "access_security_results",
+                  "fields": [
+                    { "name": "task_name", "expression": "`task_name`" },
+                    { "name": "status", "expression": "`status`" },
+                    { "name": "details", "expression": "`details`" },
+                    { "name": "remediation", "expression": "`remediation`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "status", "displayName": "Status" },
+                  { "fieldName": "details", "displayName": "Details" },
+                  { "fieldName": "remediation", "displayName": "Remediation" }
+                ]
+              },
+              "frame": { "title": "Identity & Access — Detailed Results", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 10, "width": 6, "height": 8 }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "data_quality_infra",
+      "displayName": "Data Quality & Infrastructure",
+      "layout": [
+        {
+          "widget": {
+            "name": "dq_infra_score",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "data_quality_results",
+                  "fields": [
+                    {
+                      "name": "avg(score_percentage)",
+                      "expression": "AVG(`score_percentage`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(score_percentage)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": { "type": "exact", "places": 1 },
+                    "abbreviation": "none"
+                  },
+                  "displayName": "Overall Score %"
+                }
+              },
+              "frame": { "title": "Data Quality & Infrastructure Score", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 0, "width": 3, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "dq_infra_check_count",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "data_quality_results",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(*)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": { "type": "exact", "places": 0 },
+                    "abbreviation": "none"
+                  },
+                  "displayName": "Total Checks"
+                }
+              },
+              "frame": { "title": "Total Checks", "showTitle": true }
+            }
+          },
+          "position": { "x": 3, "y": 0, "width": 3, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "dq_infra_check_breakdown",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "data_quality_results",
+                  "fields": [
+                    { "name": "task_name", "expression": "`task_name`" },
+                    { "name": "score_percentage", "expression": "`score_percentage`" },
+                    { "name": "status", "expression": "`status`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "score_percentage",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": { "type": "exact", "places": 0 },
+                    "abbreviation": "none"
+                  },
+                  "displayName": "Score %",
+                  "scale": { "type": "quantitative" }
+                },
+                "y": {
+                  "fieldName": "task_name",
+                  "displayName": "Check",
+                  "scale": { "type": "categorical" }
+                },
+                "color": {
+                  "fieldName": "status",
+                  "displayName": "Status",
+                  "scale": { "type": "categorical" }
+                }
+              },
+              "frame": { "title": "Check Breakdown", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 3, "width": 6, "height": 9 }
+        },
+        {
+          "widget": {
+            "name": "dq_infra_detail_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "data_quality_results",
+                  "fields": [
+                    { "name": "task_name", "expression": "`task_name`" },
+                    { "name": "category", "expression": "`category`" },
+                    { "name": "status", "expression": "`status`" },
+                    { "name": "details", "expression": "`details`" },
+                    { "name": "remediation", "expression": "`remediation`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "task_name", "displayName": "Check" },
+                  { "fieldName": "category", "displayName": "Category" },
+                  { "fieldName": "status", "displayName": "Status" },
+                  { "fieldName": "details", "displayName": "Details" },
+                  { "fieldName": "remediation", "displayName": "Remediation" }
+                ]
+              },
+              "frame": { "title": "Data Quality & Infrastructure — Detailed Results", "showTitle": true }
+            }
+          },
+          "position": { "x": 0, "y": 12, "width": 6, "height": 10 }
         }
       ],
       "pageType": "PAGE_TYPE_CANVAS"
