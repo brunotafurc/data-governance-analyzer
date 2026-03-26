@@ -1322,7 +1322,10 @@ def check_no_external_storage():
 
 def check_uc_compute():
     """Check if compute is UC activated with right access mode."""
-    UC_MODES = {
+    # UC-compliant cluster access modes (exact enum value names after the dot)
+    UC_CLUSTER_MODES = {
+        "USER_ISOLATION",
+        "SINGLE_USER",
         "DATA_SECURITY_MODE_STANDARD",
         "DATA_SECURITY_MODE_DEDICATED",
         "DATA_SECURITY_MODE_AUTO",
@@ -1331,32 +1334,49 @@ def check_uc_compute():
 
     try:
         w = get_workspace_client()
+        non_uc_clusters = []
+        total_clusters = 0
         for cluster in w.clusters.list():
             name = getattr(cluster, "cluster_name", None) or (cluster.get("cluster_name") if isinstance(cluster, dict) else None) or str(getattr(cluster, "cluster_id", ""))
             mode = getattr(cluster, "data_security_mode", None) or (cluster.get("data_security_mode") if isinstance(cluster, dict) else None)
-            mode_str = str(mode).strip() if mode else None
-            is_uc = mode_str and any(m in mode_str for m in UC_MODES)
-            if not is_uc:
-                return {"status": "fail", "score": 0, "max_score": max_score, "details": f"Cluster '{name}' is not UC enabled (data_security_mode: {mode_str or 'unknown'})."}
+            # Extract the enum value name (e.g. "DataSecurityMode.USER_ISOLATION" -> "USER_ISOLATION")
+            mode_str = str(mode).strip() if mode else ""
+            mode_value = mode_str.split(".")[-1] if "." in mode_str else mode_str
+            total_clusters += 1
+            if not mode_value or mode_value not in UC_CLUSTER_MODES:
+                non_uc_clusters.append(f"'{name}' (mode: {mode_str or 'unknown'})")
+
+        # For SQL warehouses, use the raw API to check the disable_uc flag.
+        # Any warehouse type (Classic, Pro, Serverless) can be UC or non-UC.
+        # disable_uc=true means non-UC; absent or false means UC-enabled.
+        non_uc_warehouses = []
+        total_warehouses = 0
         for wh in w.warehouses.list():
-            wh_id = getattr(wh, "id", None) or (wh.get("id") if isinstance(wh, dict) else None)
-            name = getattr(wh, "name", None) or getattr(wh, "warehouse_name", None) or (wh.get("name") or wh.get("warehouse_name") if isinstance(wh, dict) else None) or str(wh_id or "")
-            uc_enabled = None
-            if wh_id:
-                try:
-                    full = w.warehouses.get(id=wh_id)
-                    uc_enabled = getattr(full, "enable_unity_catalog", None)
-                    if isinstance(full, dict):
-                        uc_enabled = uc_enabled if uc_enabled is not None else full.get("enable_unity_catalog")
-                except Exception:
-                    pass
-            if uc_enabled is None:
-                uc_enabled = getattr(wh, "enable_unity_catalog", None)
-                if isinstance(wh, dict):
-                    uc_enabled = uc_enabled if uc_enabled is not None else wh.get("enable_unity_catalog")
-            if uc_enabled is not True:
-                return {"status": "fail", "score": 0, "max_score": max_score, "details": f"SQL warehouse '{name}' does not have Unity Catalog enabled."}
-        return {"status": "pass", "score": max_score, "max_score": max_score, "details": "All clusters and SQL warehouses UC compliant."}
+            total_warehouses += 1
+            wh_id = getattr(wh, "id", None)
+            name = getattr(wh, "name", None) or str(wh_id or "")
+            try:
+                raw = w.api_client.do("GET", f"/api/2.0/sql/warehouses/{wh_id}")
+                disable_uc = raw.get("disable_uc", False)
+            except Exception:
+                disable_uc = False
+            if disable_uc:
+                non_uc_warehouses.append(f"'{name}'")
+
+        failures = non_uc_clusters + non_uc_warehouses
+        if failures:
+            return {
+                "status": "fail",
+                "score": 0,
+                "max_score": max_score,
+                "details": f"{len(failures)} compute resource(s) not UC enabled: {'; '.join(failures[:5])}.",
+            }
+        return {
+            "status": "pass",
+            "score": max_score,
+            "max_score": max_score,
+            "details": f"All {total_clusters} cluster(s) and {total_warehouses} SQL warehouse(s) are UC compliant.",
+        }
     except ImportError as e:
         return {"status": "error", "score": 0, "max_score": max_score, "details": str(e)}
     except Exception as e:
