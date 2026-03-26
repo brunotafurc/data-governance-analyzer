@@ -1476,7 +1476,7 @@ def check_system_tables():
             total += 1
             state = getattr(schema_info, "state", None)
             state_str = str(state).upper() if state is not None else ""
-            if state_str == "ENABLE" or state_str == "ENABLED" or "ENABLE" in state_str:
+            if "ENABLE" in state_str or "MANAGE" in state_str:
                 enabled += 1
 
         if total == 0:
